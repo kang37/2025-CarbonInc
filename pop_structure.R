@@ -29,7 +29,7 @@ sh_pop_age <- read.csv("data_raw/shanghai_pop_by_age.csv") %>%
 # 问卷样本数分年龄。
 pop_ques_age <- data.frame(
   age_grp = c("<18", "18-25", "26-30", "31-40", "41-50", ">=51"), 
-  pop = c(7, 71, 151, 306, 72, 24)
+  pop = c(7, 71, 151, 306, 72, 24 + 400)
 ) %>% 
   mutate(prop = pop / sum(pop) * 100)
 
