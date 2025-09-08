@@ -1,9 +1,12 @@
+# 加载数据包。
 library(lavaan)
 library(psych)
 library(semTools)
 
 # 读取数据。
-data_raw <- read_excel("data_raw/2025年低碳减排问卷.xlsx") %>% 
+data_raw <- read_excel(
+  "data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx"
+) %>% 
   rename(
     "id" = "序号",
     "submit_time" = "提交答卷时间",
@@ -115,8 +118,8 @@ data <- data_raw %>%
 
 # 假设检验 ----
 # 信度检查。
-alpha(data[c("Q1", "Q2", "Q3", "Q4")])
-# Bug：另一种方式，但是结果不同？
+alpha(data[paste0("Q", 1:7)])
+# Bug：另一种方式，但是结果不同？但是要先运行建模过程。
 # reliability(fit)
 
 # 正态性检查。
@@ -125,8 +128,7 @@ apply(data[c("Q1", "Q2", "Q3", "Q4")], 2, shapiro.test)
 
 # 测量模型 ----
 model_cfa <- '
-  PEOU =~ Q1 + Q2 + Q3 + Q4
-  PU   =~ Q5 + Q6 + Q7
+  PEOU_PU =~ Q1 + Q2 + Q3 + Q4 + Q5 + Q6 + Q7
   BI   =~ Q13 + Q24
   BC   =~ B1 + B2 + B3 + B4
 '
@@ -140,14 +142,12 @@ modindices(fit_cfa, sort.=TRUE, minimum.value = 10)
 # TAM模型 ----
 model_tam <- '
   # 测量模型
-  PEOU =~ Q1 + Q2 + Q3 + Q4
-  PU   =~ Q5 + Q6 + Q7
+  PEOU_PU =~ Q1 + Q2 + Q3 + Q4 + Q5 + Q6 + Q7
   BI   =~ Q13 + Q24
   BC   =~ B1 + B2 + B3 + B4
 
   # 结构路径
-  PU ~ PEOU
-  BI ~ PEOU + PU
+  BI ~ PEOU_PU
   BC ~ BI
 '
 
@@ -162,7 +162,7 @@ library(lavaanPlot)
 lavaanPlot(
   model = fit, # 显示路径系数。
   coefs = TRUE,         
-  # stand = TRUE, # 使用标准化系数。
+  stand = TRUE, # 使用标准化系数。
   covs = TRUE, # 显示协方差。 
   stars = "regress" # 显示显著性星号。
 )
