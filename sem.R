@@ -252,7 +252,23 @@ left_join(name_tbl_model, name_tbl, by = "key") %>%
 
 # 假设检验 ----
 # 信度检查。
-alpha(data[paste0("Q", 1:7)])
+alpha_res <- left_join(name_tbl_model, name_tbl, by = "key") %>% 
+  mutate(latent = case_when(
+    short_key %in% paste0("Q", 1:4) ~ "PEOU", 
+    short_key %in% paste0("Q", 5:7) ~ "PU", 
+    short_key %in% paste0("Q", c(13, 24)) ~ "BI", 
+    short_key %in% paste0("B", 1:4) ~ "BC"
+  ), .before = 1) %>% 
+  group_by(latent) %>%
+  summarise(
+    vars = list(short_key)
+  ) %>%
+  # Bug: BI只有2项，无法计算，暂时移除。
+  filter(latent != "BI") %>% 
+  mutate(
+    alpha_result = map(vars, ~ alpha(data[.x])), 
+    alpha_value = map_dbl(alpha_result, ~ .x$total$raw_alpha)
+  )
 # Bug：另一种方式，但是结果不同？但是要先运行建模过程。
 # reliability(fit)
 
