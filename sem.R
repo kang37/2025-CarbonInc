@@ -128,7 +128,8 @@ apply(data[c("Q1", "Q2", "Q3", "Q4")], 2, shapiro.test)
 
 # 测量模型 ----
 model_cfa <- '
-  PEOU_PU =~ Q1 + Q2 + Q3 + Q4 + Q5 + Q6 + Q7
+  PEOU =~ Q1 + Q2 + Q3 + Q4
+  PU   =~ Q5 + Q6 + Q7
   BI   =~ Q13 + Q24
   BC   =~ B1 + B2 + B3 + B4
 '
@@ -142,17 +143,20 @@ modindices(fit_cfa, sort.=TRUE, minimum.value = 10)
 # TAM模型 ----
 model_tam <- '
   # 测量模型
-  PEOU_PU =~ Q1 + Q2 + Q3 + Q4 + Q5 + Q6 + Q7
+  PEOU =~ Q1 + Q2 + Q3 + Q4
+  PU   =~ Q5 + Q6 + Q7
   BI   =~ Q13 + Q24
   BC   =~ B1 + B2 + B3 + B4
 
   # 结构路径
-  BI ~ PEOU_PU
+  PU ~ PEOU
+  BI ~ PEOU + PU
   BC ~ BI
 '
 
-# 拟合模型
-fit <- sem(model_tam, data = data, estimator = "MLR")
+# 拟合模型。
+# Bug: 选择部分数据建模。
+fit <- sem(model_tam, data = data %>% filter(age < 6), estimator = "MLR")
 
 # 输出结果
 summary(fit, fit.measures = TRUE, standardized = TRUE)
@@ -161,7 +165,7 @@ summary(fit, fit.measures = TRUE, standardized = TRUE)
 library(lavaanPlot)
 lavaanPlot(
   model = fit, # 显示路径系数。
-  coefs = TRUE,         
+  coefs = TRUE, 
   stand = TRUE, # 使用标准化系数。
   covs = TRUE, # 显示协方差。 
   stars = "regress" # 显示显著性星号。
