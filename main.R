@@ -97,6 +97,62 @@ lapply(
 )
 
 # 正态化测试 ----
+# 创建一个用于正态化的函数，并保留NA值
+library(e1071)
+make_normal <- function(x) {
+  # 记录NA值的位置
+  na_indices <- is.na(x)
+  
+  # 提取非NA值进行计算
+  x_non_na <- x[!na_indices]
+  
+  # 检查数据是否全为正数，以进行对数或平方根变换
+  if (any(x_non_na <= 0)) {
+    # 如果数据包含0或负数，先进行平移
+    shift <- min(x_non_na)
+    x_shifted <- x_non_na - shift + 1e-6 # 加上一个很小的正数以避免log(0)
+    skew <- skewness(x_shifted)
+    
+    # 根据偏度决定变换方式
+    if (skew > 0) {
+      # 右偏（正偏态）：对数变换
+      transformed_x_non_na <- log(x_shifted)
+    } else {
+      # 左偏（负偏态）：平方变换
+      transformed_x_non_na <- (x_shifted)^2
+    }
+  } else {
+    # 如果数据全为正数，直接计算偏度
+    skew <- skewness(x_non_na)
+    
+    if (skew > 0) {
+      # 右偏（正偏态）：对数变换
+      transformed_x_non_na <- log(x_non_na)
+    } else {
+      # 左偏（负偏态）：平方变换
+      transformed_x_non_na <- x_non_na^2
+    }
+  }
+  
+  # 创建一个与原始数据长度相同的向量，并用NA填充
+  transformed_x <- rep(NA, length(x))
+  
+  # 将变换后的非NA值放回正确的位置
+  transformed_x[!na_indices] <- transformed_x_non_na
+  
+  # 比较变换之前和之后的Shapiro测试p值。
+  shapiro_p_before <- shapiro.test(x)$p.value
+  shapiro_p_after <- shapiro.test(transformed_x)$p.value
+  shapiro_p_rate <- shapiro_p_after / shapiro_p_before
+  cat(
+    "shapiro_p_before:", shapiro_p_before, "\n", 
+    "shapiro_p_after: ", shapiro_p_after, "\n", 
+    "shapiro_p_rate: ", shapiro_p_rate
+  )
+  
+  return(transformed_x)
+}
+
 # 假设你的数据框名为 data_frame，
 # 请将 'your_data_frame' 替换为你实际的数据框名称。
 # 并且确保 make_normal_with_test 函数已经在R环境中定义好。
