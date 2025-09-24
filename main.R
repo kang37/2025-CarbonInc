@@ -96,5 +96,61 @@ lapply(
   )
 )
 
+# 正态化测试 ----
+# 假设你的数据框名为 data_frame，
+# 请将 'your_data_frame' 替换为你实际的数据框名称。
+# 并且确保 make_normal_with_test 函数已经在R环境中定义好。
 
+# 步骤1：创建一个包含所有需要正态化变量名称的向量
+variables_to_normalize <- c(
+  "percep_ui", "percep_auto_record",
+  "percep_awareness", "percep_info_use", "percep_faster_choice",
+  "percep_guidance", "app_freq",
+  "change_bus", "change_walk", "change_off", "change_recycle",
+  "peer_recommend", "social_media_influence", "show_off"
+)
+
+# 步骤2：创建一个空列表来存储每个变量的正态化结果
+normalization_results <- list()
+
+# 步骤3：循环遍历每个变量
+your_data_frame <- data_raw
+
+for (var in variables_to_normalize) {
+  
+  # 对当前变量执行正态化，并将结果存储在一个临时变量中
+  result <- make_normal(your_data_frame[[var]])
+  
+  # 将正态化后的数据存储回数据框中
+  your_data_frame[[var]] <- result
+}
+
+model_tam <- '
+  # 测量模型
+  PEOU =~ percep_ui + percep_auto_record
+  PU   =~ percep_awareness + percep_info_use + percep_faster_choice
+  BI   =~ percep_guidance + app_freq
+  BC   =~ change_bus + change_walk + change_off + change_recycle
+  SI   =~ peer_recommend + social_media_influence + show_off
+
+  # 结构路径
+  PU ~ PEOU
+  BI ~ PU + PEOU
+  BC ~ BI + SI
+'
+fit <- sem(model_tam, data = data_raw, estimator = "MLR")
+
+# 输出结果
+summary(fit, fit.measures = TRUE, standardized = TRUE)
+
+# 作图。
+lavaanPlot(
+  model = fit, # 显示路径系数。
+  coefs = TRUE, 
+  stand = TRUE, # 使用标准化系数。
+  # covs = TRUE, # 显示协方差。 
+  stars = "regress", # 显示显著性星号。
+  graph_options = list(rankdir = "LR"), 
+  sig = 0.05
+)
 
