@@ -446,3 +446,162 @@ plot_bar_chart(data, "q19_desired_feature")
 # 环保意识。
 plot_bar_chart(data, "q4_know_carbon_credit")
 
+# 具体问题 ----
+# 检验使用APP的用户在用之前和之后行为的差异。
+# ====================================================================
+# 增强版：analyze_behavior_change 函数 (含正态性检验)
+# ====================================================================
+
+# 需要的库 (如果尚未加载)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork) # 用于组合图表
+
+#' 分析低碳APP使用前后行为差异 (配对t检验，含正态性检验)
+#' 
+#' @param data 原始数据框。
+#' @param pre_col_str 使用前行为的列名字符串。
+#' @param post_col_str 使用后行为的列名字符串。
+#' @param behavior_label 行为的描述标签。
+#' @return 包含配对t检验结果、正态性检验结果和可视化图表的列表。
+analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_label) {
+  
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+  
+  # 1. 数据准备与清洗
+  analysis_data <- data %>%
+    select(!!pre_sym, !!post_sym) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre # 计算差异分数
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post))
+  
+  # 2. **正态性检验 (Shapiro-Wilk)**
+  shapiro_result <- shapiro.test(analysis_data$Difference)
+  
+  # 3. 配对 T 检验
+  t_result <- t.test(
+    analysis_data$Post, 
+    analysis_data$Pre, 
+    paired = TRUE, 
+    alternative = "greater" 
+  )
+  
+  # 4. 数据可视化准备
+  plot_data_mean <- analysis_data %>%
+    pivot_longer(
+      cols = c(Pre, Post), 
+      names_to = "Period", 
+      values_to = "Score"
+    ) %>%
+    group_by(Period) %>%
+    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop')
+  
+  # 5. 可视化：条形图展示均值差异
+  p_mean_bar <- ggplot(plot_data_mean, aes(x = Period, y = Mean_Score, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 4) +
+    scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
+    labs(
+      title = paste0(behavior_label, " - 均值变化"),
+      y = "行为平均分",
+      x = "时期",
+      fill = "时期"
+    ) +
+    lims(y = c(min(0, min(plot_data_mean$Mean_Score) - 0.5), max(6, max(plot_data_mean$Mean_Score) + 0.5))) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+  # 6. 可视化：差异分数直方图
+  p_diff_hist <- ggplot(analysis_data, aes(x = Difference)) +
+    geom_histogram(binwidth = 1, fill = "lightblue", color = "black", na.rm = TRUE) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+    labs(
+      title = paste0(behavior_label, " - 差异分布"),
+      x = "使用后 - 使用前",
+      y = "频数"
+    ) +
+    scale_x_continuous(breaks = seq(min(analysis_data$Difference), max(analysis_data$Difference), by = 1)) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+  # 7. 可视化：差异分数 QQ 图
+  p_diff_qq <- ggplot(analysis_data, aes(sample = Difference)) +
+    stat_qq() +
+    stat_qq_line(color = "blue") +
+    labs(
+      title = paste0(behavior_label, " - QQ 图"),
+      x = "理论分位数",
+      y = "样本分位数"
+    ) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+  # 将所有图表组合成一个 patchwork 对象，方便展示
+  combined_plots <- p_mean_bar + p_diff_hist + p_diff_qq + 
+    plot_layout(ncol = 3, widths = c(1, 1, 1))
+  
+  return(list(
+    label = behavior_label,
+    t_test = t_result,
+    shapiro_test = shapiro_result,
+    mean_difference = t_result$estimate, # 直接从 t.test 结果中提取
+    mean_score_pre = mean(analysis_data$Pre, na.rm = TRUE),
+    mean_score_post = mean(analysis_data$Post, na.rm = TRUE),
+    plots = combined_plots, # 返回组合图表
+    analysis_data_raw = analysis_data # 返回原始分析数据，备用
+  ))
+}
+
+# ----------------------------------------------------------------------
+# 批量分析与结果汇总 (使用增强版函数)
+# ----------------------------------------------------------------------
+
+# 假设 'data' 是您的数据集，并且 'behavior_map' 已经定义。
+# behavior_map 见上文。
+
+# 假设您的数据框 'data' 已经加载，替换为您的实际数据框名称
+# data <- your_actual_dataframe 
+
+analysis_results_with_normality <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_change(
+    data = data, 
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# 汇总统计结果（打印 P 值和均值差异）
+for (res in analysis_results_with_normality) {
+  cat("----------------------------------\n")
+  cat("行为:", res$label, "\n")
+  cat("使用前均值:", round(res$mean_score_pre, 2), "\n")
+  cat("使用后均值:", round(res$mean_score_post, 2), "\n")
+  cat("均值差异:", round(res$mean_difference, 2), "\n")
+  cat("Shapiro-Wilk 正态性检验 P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
+  if (res$shapiro_test$p.value < 0.05) {
+    cat("  -> 正态性假设不满足！配对t检验结果可能不可靠。\n")
+  } else {
+    cat("  -> 正态性假设满足。\n")
+  }
+  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+}
+
+# 组合所有图表 (这将显示每个行为的三张图：均值条形图，差异直方图，差异 QQ 图)
+# Reduce(`+`, lapply(analysis_results_with_normality, function(x) x$plots))
+# 更好的方法是逐一打印每个行为的组合图，或者用 patchwork 组合所有行为的某个特定图类型
+
+# 示例：逐一打印每个行为的组合图
+# for (res in analysis_results_with_normality) {
+#   print(res$plots)
+#   readline(prompt="按 [回车] 查看下一个图...") # 暂停，方便查看
+# }
+
+
+
