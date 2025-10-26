@@ -449,23 +449,20 @@ plot_bar_chart(data, "q4_know_carbon_credit")
 # 具体问题 ----
 # 检验使用APP的用户在用之前和之后行为的差异。
 # ====================================================================
-# 增强版：analyze_behavior_change 函数 (含正态性检验)
+# 增强版：analyze_behavior_change 函数 (含正态性检验和数据变换选项)
 # ====================================================================
 
-# 需要的库 (如果尚未加载)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(patchwork) # 用于组合图表
-
-#' 分析低碳APP使用前后行为差异 (配对t检验，含正态性检验)
+#' 分析低碳APP使用前后行为差异 (配对t检验，含正态性检验和数据变换选项)
 #' 
 #' @param data 原始数据框。
 #' @param pre_col_str 使用前行为的列名字符串。
 #' @param post_col_str 使用后行为的列名字符串。
 #' @param behavior_label 行为的描述标签。
+#' @param transform_data 逻辑值，是否对差异分数进行平方根变换。
+#'                       (注意：对Likert数据进行变换解释性会降低，非参数检验通常更优)
 #' @return 包含配对t检验结果、正态性检验结果和可视化图表的列表。
-analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_label) {
+analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_str, behavior_label, 
+                                                   transform_data = FALSE) { # 新增参数
   
   pre_sym <- sym(pre_col_str)
   post_sym <- sym(post_col_str)
@@ -476,22 +473,45 @@ analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_la
     mutate(
       Pre = as.numeric(!!pre_sym),
       Post = as.numeric(!!post_sym),
-      Difference = Post - Pre # 计算差异分数
+      Difference = Post - Pre # 原始差异分数
     ) %>%
     filter(!is.na(Pre) & !is.na(Post))
   
-  # 2. **正态性检验 (Shapiro-Wilk)**
-  shapiro_result <- shapiro.test(analysis_data$Difference)
+  # 2. **数据变换 (如果 transform_data = TRUE)**
+  transformed_difference <- analysis_data$Difference
+  transform_type_label <- "原始"
   
-  # 3. 配对 T 检验
+  if (transform_data) {
+    # 平方根变换需要所有值非负。如果存在负差异，需要先平移。
+    # 找到最小差异值，将其变为非负。
+    min_diff <- min(analysis_data$Difference)
+    if (min_diff < 0) {
+      shift_val <- abs(min_diff) + 1 # 确保所有值都 > 0
+      transformed_difference <- sqrt(analysis_data$Difference + shift_val)
+      transform_type_label <- paste0("平方根(平移", shift_val, ")")
+    } else {
+      transformed_difference <- sqrt(analysis_data$Difference)
+      transform_type_label <- "平方根"
+    }
+  }
+  
+  # 3. **正态性检验 (Shapiro-Wilk) - 对变换后的差异分数**
+  shapiro_result <- shapiro.test(transformed_difference)
+  
+  # 4. 配对 T 检验 - 对变换后的差异分数
+  # 这里我们实际上是对变换后的“差异”与“零”进行单样本 t 检验。
+  # 也可以直接对变换后的 Post 和 Pre 进行配对 t 检验，但这在解释上更复杂。
+  # t.test(transformed_difference, mu = 0, alternative = "greater")
+  # 鉴于我们想保持与原始配对t检验的框架一致，我们对原始分数进行t检验，
+  # 但其有效性依赖于变换后差异的正态性。
+  # 注意：配对t检验的本质是检验差异分数的均值是否为0。
   t_result <- t.test(
-    analysis_data$Post, 
-    analysis_data$Pre, 
-    paired = TRUE, 
+    transformed_difference, # 对变换后的差异分数进行单样本t检验，检验均值是否为0
+    mu = 0, 
     alternative = "greater" 
   )
   
-  # 4. 数据可视化准备
+  # 5. 数据可视化准备 (条形图仍显示原始均值)
   plot_data_mean <- analysis_data %>%
     pivot_longer(
       cols = c(Pre, Post), 
@@ -501,13 +521,13 @@ analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_la
     group_by(Period) %>%
     summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop')
   
-  # 5. 可视化：条形图展示均值差异
+  # 6. 可视化：条形图展示原始均值差异
   p_mean_bar <- ggplot(plot_data_mean, aes(x = Period, y = Mean_Score, fill = Period)) +
     geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
     geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 4) +
     scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
     labs(
-      title = paste0(behavior_label, " - 均值变化"),
+      title = paste0(behavior_label, " - 原始均值变化"),
       y = "行为平均分",
       x = "时期",
       fill = "时期"
@@ -516,32 +536,32 @@ analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_la
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 6. 可视化：差异分数直方图
-  p_diff_hist <- ggplot(analysis_data, aes(x = Difference)) +
-    geom_histogram(binwidth = 1, fill = "lightblue", color = "black", na.rm = TRUE) +
+  # 7. 可视化：差异分数直方图 (显示变换后的分布)
+  p_diff_hist <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
+                        aes(x = Transformed_Difference)) +
+    geom_histogram(binwidth = if(transform_data) 0.1 else 1, fill = "lightblue", color = "black", na.rm = TRUE) +
     geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
     labs(
-      title = paste0(behavior_label, " - 差异分布"),
-      x = "使用后 - 使用前",
+      title = paste0(behavior_label, " - 差异分布 (", transform_type_label, ")"),
+      x = paste0("使用后 - 使用前 (", transform_type_label, ")"),
       y = "频数"
     ) +
-    scale_x_continuous(breaks = seq(min(analysis_data$Difference), max(analysis_data$Difference), by = 1)) +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 7. 可视化：差异分数 QQ 图
-  p_diff_qq <- ggplot(analysis_data, aes(sample = Difference)) +
+  # 8. 可视化：差异分数 QQ 图 (显示变换后的分布)
+  p_diff_qq <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
+                      aes(sample = Transformed_Difference)) +
     stat_qq() +
     stat_qq_line(color = "blue") +
     labs(
-      title = paste0(behavior_label, " - QQ 图"),
+      title = paste0(behavior_label, " - QQ 图 (", transform_type_label, ")"),
       x = "理论分位数",
       y = "样本分位数"
     ) +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 将所有图表组合成一个 patchwork 对象，方便展示
   combined_plots <- p_mean_bar + p_diff_hist + p_diff_qq + 
     plot_layout(ncol = 3, widths = c(1, 1, 1))
   
@@ -549,10 +569,13 @@ analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_la
     label = behavior_label,
     t_test = t_result,
     shapiro_test = shapiro_result,
-    mean_difference = t_result$estimate, # 直接从 t.test 结果中提取
-    mean_score_pre = mean(analysis_data$Pre, na.rm = TRUE),
-    mean_score_post = mean(analysis_data$Post, na.rm = TRUE),
-    plots = combined_plots, # 返回组合图表
+    transform_applied = transform_data,
+    transform_label = transform_type_label,
+    original_mean_difference = mean(analysis_data$Difference, na.rm = TRUE), # 返回原始均值差异
+    transformed_mean = t_result$estimate, # 变换后的差异均值
+    original_mean_score_pre = mean(analysis_data$Pre, na.rm = TRUE),
+    original_mean_score_post = mean(analysis_data$Post, na.rm = TRUE),
+    plots = combined_plots,
     analysis_data_raw = analysis_data # 返回原始分析数据，备用
   ))
 }
@@ -564,27 +587,28 @@ analyze_behavior_change <- function(data, pre_col_str, post_col_str, behavior_la
 # 假设 'data' 是您的数据集，并且 'behavior_map' 已经定义。
 # behavior_map 见上文。
 
-# 假设您的数据框 'data' 已经加载，替换为您的实际数据框名称
 # data <- your_actual_dataframe 
 
-analysis_results_with_normality <- lapply(names(behavior_map), function(b) {
+# 运行不进行变换的版本 (默认 transform_data = FALSE)
+cat("\n--- 原始数据分析结果 (配对t检验) ---\n")
+analysis_results_original <- lapply(names(behavior_map), function(b) {
   cols <- behavior_map[[b]]
-  analyze_behavior_change(
+  analyze_behavior_change_with_transform(
     data = data, 
     pre_col_str = cols[1],
     post_col_str = cols[2],
-    behavior_label = b
+    behavior_label = b,
+    transform_data = FALSE # 不进行变换
   )
 })
 
-# 汇总统计结果（打印 P 值和均值差异）
-for (res in analysis_results_with_normality) {
+for (res in analysis_results_original) {
   cat("----------------------------------\n")
   cat("行为:", res$label, "\n")
-  cat("使用前均值:", round(res$mean_score_pre, 2), "\n")
-  cat("使用后均值:", round(res$mean_score_post, 2), "\n")
-  cat("均值差异:", round(res$mean_difference, 2), "\n")
-  cat("Shapiro-Wilk 正态性检验 P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
+  cat("原始使用前均值:", round(res$original_mean_score_pre, 2), "\n")
+  cat("原始使用后均值:", round(res$original_mean_score_post, 2), "\n")
+  cat("原始均值差异:", round(res$original_mean_difference, 2), "\n")
+  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
   if (res$shapiro_test$p.value < 0.05) {
     cat("  -> 正态性假设不满足！配对t检验结果可能不可靠。\n")
   } else {
@@ -592,16 +616,43 @@ for (res in analysis_results_with_normality) {
   }
   cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
 }
-
-# 组合所有图表 (这将显示每个行为的三张图：均值条形图，差异直方图，差异 QQ 图)
-# Reduce(`+`, lapply(analysis_results_with_normality, function(x) x$plots))
-# 更好的方法是逐一打印每个行为的组合图，或者用 patchwork 组合所有行为的某个特定图类型
-
-# 示例：逐一打印每个行为的组合图
-# for (res in analysis_results_with_normality) {
+# 打印原始数据的图表
+# for (res in analysis_results_original) {
 #   print(res$plots)
-#   readline(prompt="按 [回车] 查看下一个图...") # 暂停，方便查看
+#   readline(prompt="按 [回车] 查看下一个原始数据图...")
 # }
 
 
+# 运行进行平方根变换的版本
+cat("\n--- 平方根变换数据分析结果 (配对t检验) ---\n")
+analysis_results_transformed <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_change_with_transform(
+    data = data, 
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b,
+    transform_data = TRUE # 进行平方根变换
+  )
+})
 
+for (res in analysis_results_transformed) {
+  cat("----------------------------------\n")
+  cat("行为:", res$label, "\n")
+  cat("原始使用前均值:", round(res$original_mean_score_pre, 2), "\n")
+  cat("原始使用后均值:", round(res$original_mean_score_post, 2), "\n")
+  cat("原始均值差异:", round(res$original_mean_difference, 2), "\n")
+  cat("Shapiro-Wilk P 值 (", res$transform_label, "差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
+  if (res$shapiro_test$p.value < 0.05) {
+    cat("  -> 正态性假设不满足！变换后的配对t检验结果可能仍不可靠。\n")
+  } else {
+    cat("  -> 正态性假设满足 (变换后)。\n")
+  }
+  cat("变换后配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
+}
+# 打印变换后的图表
+# for (res in analysis_results_transformed) {
+#   print(res$plots)
+#   readline(prompt="按 [回车] 查看下一个变换后数据图...")
+# }
