@@ -9,15 +9,15 @@ model_1_base_df <- data.frame(
   Latent_Variable = c(
     rep("PFV", 3),
     rep("PIV", 3),
-    rep("PB", 3),
-    rep("RD", 3),
+    # rep("PB", 3),
+    # rep("RD", 3),
     rep("BC", 3)
   ),
   Observed_Variable = c(
     "q4_ui_simple", "q4_auto_record", "q4_clear_guidance",
     "q13_attract_points", "q13_attract_credit", "q13_attract_daily_task",
-    "q15_barrier_unknown", "q15_barrier_privacy", "q15_barrier_low_reward",
-    "q20_cumulative_inspire", "q20_image_inspire", "q20_ranking_motivation",
+    # "q15_barrier_unknown", "q15_barrier_privacy", "q15_barrier_low_reward",
+    # "q20_cumulative_inspire", "q20_image_inspire", "q20_ranking_motivation",
     "q18_change_public_trans", "q18_change_bike_walk", "q18_change_turn_off_power"
   )
 )
@@ -176,7 +176,8 @@ plt_cfa_structure_from_df <- function(measure_model_df) {
   )
   
   # 渲染图形
-  grViz(dot_code)
+  # grViz(dot_code)
+  return(dot_code)
 }
 
 # 函数：从数据框构建 lavaan CFA 模型语法
@@ -327,7 +328,20 @@ lapply(
   }
 )
 
-
+# 如果只画图。
+lapply(
+  list(
+    list(df = model_1_base_df, name = "M1_Base"),
+    list(df = model_2_value_df, name = "M2_Value"),
+    list(df = model_3_tam_df, name = "M3_TAM"),
+    list(df = model_4_simplified_bc_df, name = "M4_Simplified_BC"),
+    list(df = model_5_tpb_attitude_df, name = "M5_TPB_Attitude"),
+    list(df = model_6_two_incentive_df, name = "M6_Two_Incentive")
+  ),
+  function(model_info) {
+    print(plt_cfa_structure_from_df(model_info$df))
+  }
+)
 
 
 
