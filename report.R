@@ -830,3 +830,286 @@ for (i in seq_along(names(behavior_map))) {
   
   print(p)
 }
+
+# 使用APP和不使用APP的人差异是？
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(patchwork)
+
+# 1. 定义行为对应关系（三个时期）
+behavior_three_groups_map <- list(
+  "公共交通" = list(
+    pre = "q16_pre_public_trans",
+    post = "q18_change_public_trans",
+    non_user = "q17_usual_public_trans"
+  ),
+  "骑行/步行" = list(
+    pre = "q16_pre_bike_walk",
+    post = "q18_change_bike_walk",
+    non_user = "q17_usual_bike_walk"
+  ),
+  "关闭电源" = list(
+    pre = "q16_pre_turn_off_power",
+    post = "q18_change_turn_off_power",
+    non_user = "q17_usual_turn_off_power"
+  ),
+  "垃圾分类" = list(
+    pre = "q16_pre_garbage_sort",
+    post = "q18_change_garbage_sort",
+    non_user = "q17_usual_garbage_sort"
+  ),
+  "使用环保袋" = list(
+    pre = "q16_pre_reusable_bag",
+    post = "q18_change_reusable_bag",
+    non_user = "q17_usual_reusable_bag"
+  ),
+  "选择节能产品" = list(
+    pre = "q16_pre_choose_energy_eff",
+    post = "q18_change_choose_energy_eff",
+    non_user = "q17_usual_choose_energy_eff"
+  )
+)
+
+# 2. 函数：比较三组的行为差异
+compare_three_groups <- function(data, pre_col, post_col, non_user_col, behavior_label) {
+  
+  # 提取使用过APP用户的使用前数据
+  pre_data <- data %>%
+    filter(q1_used_app == 1) %>%
+    select(score = all_of(pre_col)) %>%
+    mutate(score = as.numeric(score)) %>%
+    filter(!is.na(score)) %>%
+    mutate(group = "使用前(APP用户)")
+  
+  # 提取使用过APP用户的使用后数据
+  post_data <- data %>%
+    filter(q1_used_app == 1) %>%
+    select(score = all_of(post_col)) %>%
+    mutate(score = as.numeric(score)) %>%
+    filter(!is.na(score)) %>%
+    mutate(group = "使用后(APP用户)")
+  
+  # 提取未使用过APP用户的平时数据
+  non_user_data <- data %>%
+    filter(q1_used_app != 1) %>%
+    select(score = all_of(non_user_col)) %>%
+    mutate(score = as.numeric(score)) %>%
+    filter(!is.na(score)) %>%
+    mutate(group = "非APP用户")
+  
+  # 合并数据
+  combined_data <- bind_rows(pre_data, post_data, non_user_data) %>%
+    mutate(group = factor(group, levels = c("使用前(APP用户)", "使用后(APP用户)", "非APP用户")))
+  
+  # Kruskal-Wallis 检验（三组或以上的非参数检验）
+  kruskal_result <- kruskal.test(score ~ group, data = combined_data)
+  
+  # 事后成对比较（Pairwise Wilcoxon检验，Bonferroni校正）
+  if (kruskal_result$p.value < 0.05) {
+    pairwise_result <- pairwise.wilcox.test(
+      combined_data$score,
+      combined_data$group,
+      p.adjust.method = "bonferroni",
+      exact = FALSE
+    )
+  } else {
+    pairwise_result <- NULL
+  }
+  
+  # 计算描述性统计
+  summary_stats <- combined_data %>%
+    group_by(group) %>%
+    summarise(
+      n = n(),
+      mean = mean(score, na.rm = TRUE),
+      sd = sd(score, na.rm = TRUE),
+      median = median(score, na.rm = TRUE),
+      se = sd / sqrt(n),
+      .groups = 'drop'
+    )
+  
+  # 计算效应量（使用前 vs 使用后 的 Cohen's d）
+  if (nrow(pre_data) > 0 && nrow(post_data) > 0) {
+    mean_pre <- summary_stats$mean[summary_stats$group == "使用前(APP用户)"]
+    mean_post <- summary_stats$mean[summary_stats$group == "使用后(APP用户)"]
+    sd_pre <- summary_stats$sd[summary_stats$group == "使用前(APP用户)"]
+    sd_post <- summary_stats$sd[summary_stats$group == "使用后(APP用户)"]
+    n_pre <- summary_stats$n[summary_stats$group == "使用前(APP用户)"]
+    n_post <- summary_stats$n[summary_stats$group == "使用后(APP用户)"]
+    
+    pooled_sd <- sqrt(((n_pre - 1) * sd_pre^2 + (n_post - 1) * sd_post^2) / 
+                        (n_pre + n_post - 2))
+    cohen_d_pre_post <- (mean_post - mean_pre) / pooled_sd
+    
+    effect_label_pre_post <- ifelse(abs(cohen_d_pre_post) < 0.2, "忽略不计",
+                                    ifelse(abs(cohen_d_pre_post) < 0.5, "小",
+                                           ifelse(abs(cohen_d_pre_post) < 0.8, "中", "大")))
+  } else {
+    cohen_d_pre_post <- NA
+    effect_label_pre_post <- NA
+  }
+  
+  # 可视化：箱线图 + 散点
+  p <- ggplot(combined_data, aes(x = group, y = score, fill = group)) +
+    geom_boxplot(alpha = 0.7, width = 0.6, outlier.shape = NA) +
+    geom_jitter(alpha = 0.3, width = 0.2, size = 0.8) +
+    stat_summary(
+      fun = mean,
+      geom = "point",
+      shape = 23,
+      size = 3,
+      fill = "red",
+      color = "black"
+    ) +
+    scale_fill_manual(values = c(
+      "使用前(APP用户)" = "#FCA5A5",
+      "使用后(APP用户)" = "#86EFAC",
+      "非APP用户" = "#93C5FD"
+    )) +
+    labs(
+      title = behavior_label,
+      subtitle = paste0("Kruskal-Wallis p ", 
+                        ifelse(kruskal_result$p.value < 0.001, "< 0.001",
+                               paste("=", round(kruskal_result$p.value, 3)))),
+      y = "行为频率评分",
+      x = NULL
+    ) +
+    ylim(0.5, 5.5) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 11),
+      plot.subtitle = element_text(hjust = 0.5, size = 9),
+      legend.position = "none",
+      axis.text.x = element_text(angle = 20, hjust = 1, size = 8)
+    )
+  
+  # 添加显著性标记
+  if (kruskal_result$p.value < 0.001) {
+    sig_label <- "***"
+  } else if (kruskal_result$p.value < 0.01) {
+    sig_label <- "**"
+  } else if (kruskal_result$p.value < 0.05) {
+    sig_label <- "*"
+  } else {
+    sig_label <- "ns"
+  }
+  
+  p <- p + annotate("text", x = 2, y = 5.3, label = sig_label, size = 8)
+  
+  # 可视化：柱状图（均值 + 误差线）
+  p_bar <- ggplot(summary_stats, aes(x = group, y = mean, fill = group)) +
+    geom_bar(stat = "identity", alpha = 0.8, width = 0.6) +
+    geom_errorbar(
+      aes(ymin = mean - se, ymax = mean + se),
+      width = 0.2
+    ) +
+    geom_text(aes(label = round(mean, 2)), vjust = -1.5, size = 3.5) +
+    scale_fill_manual(values = c(
+      "使用前(APP用户)" = "#FCA5A5",
+      "使用后(APP用户)" = "#86EFAC",
+      "非APP用户" = "#93C5FD"
+    )) +
+    labs(
+      title = behavior_label,
+      subtitle = paste0("p ", ifelse(kruskal_result$p.value < 0.001, "< 0.001",
+                                     paste("=", round(kruskal_result$p.value, 3)))),
+      y = "行为平均分 (± SE)",
+      x = NULL
+    ) +
+    ylim(0, max(summary_stats$mean + summary_stats$se) * 1.3) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 11),
+      plot.subtitle = element_text(hjust = 0.5, size = 9),
+      legend.position = "none",
+      axis.text.x = element_text(angle = 20, hjust = 1, size = 8)
+    )
+  
+  return(list(
+    label = behavior_label,
+    summary_stats = summary_stats,
+    kruskal_result = kruskal_result,
+    pairwise_result = pairwise_result,
+    cohen_d_pre_post = cohen_d_pre_post,
+    effect_label_pre_post = effect_label_pre_post,
+    significance = sig_label,
+    plot_box = p,
+    plot_bar = p_bar,
+    combined_data = combined_data
+  ))
+}
+
+# 3. 批量分析
+three_group_results <- lapply(names(behavior_three_groups_map), function(b) {
+  cols <- behavior_three_groups_map[[b]]
+  compare_three_groups(
+    data = data,
+    pre_col = cols$pre,
+    post_col = cols$post,
+    non_user_col = cols$non_user,
+    behavior_label = b
+  )
+})
+
+# 4. 生成汇总表格
+three_group_table <- do.call(rbind, lapply(three_group_results, function(res) {
+  stats <- res$summary_stats
+  
+  data.frame(
+    行为 = res$label,
+    使用前样本量 = stats$n[stats$group == "使用前(APP用户)"],
+    使用前均值 = round(stats$mean[stats$group == "使用前(APP用户)"], 2),
+    使用后样本量 = stats$n[stats$group == "使用后(APP用户)"],
+    使用后均值 = round(stats$mean[stats$group == "使用后(APP用户)"], 2),
+    非用户样本量 = stats$n[stats$group == "非APP用户"],
+    非用户均值 = round(stats$mean[stats$group == "非APP用户"], 2),
+    使用前后差异 = round(stats$mean[stats$group == "使用后(APP用户)"] -
+                     stats$mean[stats$group == "使用前(APP用户)"], 2),
+    Kruskal_p值 = format.pval(res$kruskal_result$p.value, digits = 3),
+    Cohen_d前后 = round(res$cohen_d_pre_post, 3),
+    效应量 = res$effect_label_pre_post,
+    显著性 = res$significance,
+    stringsAsFactors = FALSE
+  )
+}))
+
+# 打印表格
+kable(three_group_table,
+      format = "html",
+      caption = "三组行为对比：使用前 vs 使用后 vs 非APP用户",
+      align = c('l', rep('c', 11))) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 12
+  ) %>%
+  column_spec(12, bold = TRUE) %>%
+  row_spec(which(three_group_table$显著性 %in% c("*", "**", "***")),
+           background = "#D4EDDA")
+
+# 5. 组合所有箱线图
+combined_box_plot <- Reduce(`+`, lapply(three_group_results, function(x) x$plot_box)) +
+  plot_layout(ncol = 2)
+
+print(combined_box_plot)
+
+# 6. 组合所有柱状图
+combined_bar_plot <- Reduce(`+`, lapply(three_group_results, function(x) x$plot_bar)) +
+  plot_layout(ncol = 2)
+
+print(combined_bar_plot)
+
+# 7. 打印成对比较结果（如果显著）
+cat("\n\n## 事后成对比较结果 (Bonferroni校正)\n\n")
+for (res in three_group_results) {
+  if (!is.null(res$pairwise_result)) {
+    cat("\n### ", res$label, "\n")
+    print(res$pairwise_result)
+    cat("\n")
+  }
+}
+
