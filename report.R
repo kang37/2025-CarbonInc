@@ -447,253 +447,100 @@ plot_bar_chart(data, "q19_desired_feature")
 plot_bar_chart(data, "q4_know_carbon_credit")
 
 # 具体问题 ----
-# ====================================================================
-# 增强版：analyze_behavior_change 函数 (含正态性检验和多种数据变换选项)
-
-#' 分析低碳APP使用前后行为差异 (配对t检验，含正态性检验和数据变换选项)
-#' 
-#' @param data 原始数据框。
-#' @param pre_col_str 使用前行为的列名字符串。
-#' @param post_col_str 使用后行为的列名字符串。
-#' @param behavior_label 行为的描述标签。
-#' @param transform_type 字符串，指定数据变换类型。可选值：
-#'                       - NULL 或 "none": 不进行变换 (默认)。
-#'                       - "log": 对数变换 (需要数据为正，可能进行平移)。
-#'                       - "sqrt": 平方根变换 (需要数据为非负，可能进行平移)。
-#'                       - "boxcox": Box-Cox 变换 (需要数据为正，可能进行平移)。
-#'                       (注意：对Likert数据进行变换解释性会降低，非参数检验通常更优)
-#' @return 包含配对t检验结果、正态性检验结果和可视化图表的列表。
-analyze_behavior_change_with_transforms <- function(data, pre_col_str, post_col_str, behavior_label, 
-                                                    transform_type = NULL) { 
+# APP使用前后行为变化。
+analyze_behavior_change_wilcoxon <- function(
+    data, pre_col_str, post_col_str, behavior_label) {
   
+  # 将字符串列名转换为符号
   pre_sym <- sym(pre_col_str)
   post_sym <- sym(post_col_str)
   
   # 1. 数据准备与清洗
   analysis_data <- data %>%
     select(!!pre_sym, !!post_sym) %>%
+    # 确保列是数值型（Wilcoxon和t.test都要求数值型）
     mutate(
       Pre = as.numeric(!!pre_sym),
       Post = as.numeric(!!post_sym),
-      Difference = Post - Pre # 原始差异分数
+      Difference = Post - Pre
     ) %>%
     filter(!is.na(Pre) & !is.na(Post))
   
-  # 2. **数据变换**
-  transformed_difference <- analysis_data$Difference
-  transform_type_label <- "原始"
-  shift_val <- 0 # 用于记录平移量
-  
-  if (!is.null(transform_type) && transform_type != "none") {
-    min_diff <- min(analysis_data$Difference)
-    
-    # 确保数据为正数才能进行对数或 Box-Cox 变换
-    if (min_diff <= 0 && transform_type %in% c("log", "boxcox")) {
-      shift_val <- abs(min_diff) + 1 # 确保所有值都 > 0
-      temp_diff_for_transform <- analysis_data$Difference + shift_val
-      transform_type_label <- paste0(transform_type, "(平移", shift_val, ")")
-    } else if (min_diff < 0 && transform_type == "sqrt") { # 平方根只需要非负
-      shift_val <- abs(min_diff) # 确保所有值都 >= 0
-      temp_diff_for_transform <- analysis_data$Difference + shift_val
-      transform_type_label <- paste0(transform_type, "(平移", shift_val, ")")
-    } else {
-      temp_diff_for_transform <- analysis_data$Difference
-      transform_type_label <- transform_type
-    }
-    
-    if (transform_type == "log") {
-      transformed_difference <- log(temp_diff_for_transform)
-    } else if (transform_type == "sqrt") {
-      transformed_difference <- sqrt(temp_diff_for_transform)
-    } else if (transform_type == "boxcox") {
-      # Box-Cox 变换需要安装 car 包
-      if (!requireNamespace("car", quietly = TRUE)) {
-        stop("请安装 'car' 包以使用 Box-Cox 变换: install.packages('car')")
-      }
-      # Box-Cox 只能处理单列数据，且不能有 NA
-      # 这里使用 powerTransform 寻找最佳 lambda
-      # 注意：powerTransform 在数据完全不偏时可能失败，或者建议不变换
-      bc_transform <- tryCatch({
-        car::powerTransform(temp_diff_for_transform)
-      }, error = function(e) {
-        warning(paste0("Box-Cox 变换失败或不适用 (", behavior_label, "): ", e$message, ". 使用原始数据进行检验。"))
-        return(NULL)
-      })
-      
-      if (!is.null(bc_transform)) {
-        lambda <- bc_transform$lambda
-        transformed_difference <- (temp_diff_for_transform^lambda - 1) / lambda
-        transform_type_label <- paste0("Box-Cox(lambda=", round(lambda, 2), ", 平移", shift_val, ")")
-      } else {
-        # 如果 Box-Cox 失败，则不进行变换
-        transformed_difference <- analysis_data$Difference
-        transform_type_label <- "原始 (Box-Cox 失败)"
-        transform_type <- "none" # 标记为未变换
-      }
-      
-    } else {
-      warning("未知的数据变换类型，将不进行变换。")
-      transform_type_label <- "原始 (未知变换类型)"
-      transform_type <- "none" # 标记为未变换
-    }
-  }
-  
-  # 3. **正态性检验 (Shapiro-Wilk) - 对变换后的差异分数**
-  shapiro_result <- shapiro.test(transformed_difference)
-  
-  # 4. 配对 T 检验 - 对变换后的差异分数 (单样本 t 检验 H0: 均值=0)
-  t_result <- t.test(
-    transformed_difference, 
-    mu = 0, 
-    alternative = "greater" 
+  # 2. **Wilcoxon 符号秩检验 (统计上更严谨)**
+  # 检验 H0: 中位数差异 = 0 (APP无效) vs Ha: 中位数差异 > 0 (APP有效)
+  wilcox_result <- wilcox.test(
+    analysis_data$Post, 
+    analysis_data$Pre, 
+    paired = TRUE, 
+    alternative = "greater",
+    # 启用精确 p 值计算（如果样本量不大于 50）或使用校正
+    exact = FALSE, # 设置为 FALSE 使用正态近似或连续性校正
+    correct = TRUE
   )
   
-  # 5. 可视化：条形图展示原始均值差异
-  plot_data_mean <- analysis_data %>%
+  # 3. 数据可视化准备
+  plot_data <- analysis_data %>%
+    # 转换为长格式以便ggplot绘图
     pivot_longer(
       cols = c(Pre, Post), 
       names_to = "Period", 
       values_to = "Score"
     ) %>%
     group_by(Period) %>%
+    # 仅展示均值，但您也可以选择展示中位数
     summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop')
   
-  p_mean_bar <- ggplot(plot_data_mean, aes(x = Period, y = Mean_Score, fill = Period)) +
+  # 4. 可视化：条形图展示均值差异
+  p <- ggplot(plot_data, aes(x = Period, y = Mean_Score, fill = Period)) +
     geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
     geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 4) +
     scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
     labs(
-      title = paste0(behavior_label, " - 原始均值变化"),
+      title = paste0(behavior_label),
       y = "行为平均分",
       x = "时期",
       fill = "时期"
     ) +
-    lims(y = c(min(0, min(plot_data_mean$Mean_Score) - 0.5), max(6, max(plot_data_mean$Mean_Score) + 0.5))) +
+    lims(y = c(0, 6)) +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 6. 可视化：差异分数直方图 (显示变换后的分布)
-  p_diff_hist <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
-                        aes(x = Transformed_Difference)) +
-    geom_histogram(fill = "lightblue", color = "black", na.rm = TRUE, bins = 30) + # 增加 bins 参数
-    geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
-    labs(
-      title = paste0(behavior_label, " - 差异分布 (", transform_type_label, ")"),
-      x = paste0("使用后 - 使用前 (", transform_type_label, ")"),
-      y = "频数"
-    ) +
-    theme_minimal() +
-    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
-  
-  # 7. 可视化：差异分数 QQ 图 (显示变换后的分布)
-  p_diff_qq <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
-                      aes(sample = Transformed_Difference)) +
-    stat_qq() +
-    stat_qq_line(color = "blue") +
-    labs(
-      title = paste0(behavior_label, " - QQ 图 (", transform_type_label, ")"),
-      x = "理论分位数",
-      y = "样本分位数"
-    ) +
-    theme_minimal() +
-    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
-  
-  combined_plots <- p_mean_bar + p_diff_hist + p_diff_qq + 
-    plot_layout(ncol = 3, widths = c(1, 1, 1))
+  # 5. 估计（中位数或均值）差异
+  # 对于Wilcoxon，我们报告中位数差异（虽然报告均值变化也是可以接受的展示方式）
+  median_diff <- median(analysis_data$Difference, na.rm = TRUE)
   
   return(list(
     label = behavior_label,
-    t_test = t_result,
-    shapiro_test = shapiro_result,
-    transform_applied = !is.null(transform_type) && transform_type != "none",
-    transform_label = transform_type_label,
-    original_mean_difference = mean(analysis_data$Difference, na.rm = TRUE),
-    transformed_mean = t_result$estimate,
-    original_mean_score_pre = mean(analysis_data$Pre, na.rm = TRUE),
-    original_mean_score_post = mean(analysis_data$Post, na.rm = TRUE),
-    plots = combined_plots,
-    analysis_data_raw = analysis_data # 返回原始分析数据，备用
+    test_result = wilcox_result,
+    plot = p,
+    median_difference = median_diff,
+    mean_score_pre = plot_data$Mean_Score[plot_data$Period == "Pre"],
+    mean_score_post = plot_data$Mean_Score[plot_data$Period == "Post"]
   ))
 }
 
 # ----------------------------------------------------------------------
-# 批量分析与结果汇总 (使用增强版函数)
-# ----------------------------------------------------------------------
-
-# 假设 'data' 是您的数据集，并且 'behavior_map' 已经定义。
-# behavior_map 见上文。
-
-# data <- your_actual_dataframe 
-
-# --- 运行不同变换类型进行测试 ---
-
-# 1. 不进行变换 (与上次分析结果相同)
-cat("\n--- 分析结果: 不进行变换 ---\n")
-analysis_results_none <- lapply(names(behavior_map), function(b) {
+# 批量分析与结果汇总 (调整打印以适应新函数输出)
+analysis_results_wilcoxon <- lapply(names(behavior_map), function(b) {
   cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
-                                          behavior_label = b, transform_type = NULL)
+  # 请务必将 data = data 替换为您的实际数据框名称
+  analyze_behavior_change_wilcoxon(
+    data = data, 
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
 })
-for (res in analysis_results_none) {
+
+# 汇总统计结果（打印 P 值和均值差异）
+for (res in analysis_results_wilcoxon) {
   cat("----------------------------------\n")
   cat("行为:", res$label, "\n")
-  cat("变换类型:", res$transform_label, "\n")
-  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+  cat("使用前均值:", round(res$mean_score_pre, 2), "\n")
+  cat("使用后均值:", round(res$mean_score_post, 2), "\n")
+  cat("中位数差异:", round(res$median_difference, 2), "\n")
+  cat("Wilcoxon 符号秩检验 P 值:", format.pval(res$test_result$p.value, digits = 4), "\n")
 }
-# for (res in analysis_results_none) { print(res$plots); readline(prompt="...") }
 
-
-# 2. 对数变换
-cat("\n--- 分析结果: 对数变换 ---\n")
-analysis_results_log <- lapply(names(behavior_map), function(b) {
-  cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
-                                          behavior_label = b, transform_type = "log")
-})
-for (res in analysis_results_log) {
-  cat("----------------------------------\n")
-  cat("行为:", res$label, "\n")
-  cat("变换类型:", res$transform_label, "\n")
-  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
-  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
-}
-# for (res in analysis_results_log) { print(res$plots); readline(prompt="...") }
-
-
-# 3. 平方根变换 (与上次尝试类似)
-cat("\n--- 分析结果: 平方根变换 ---\n")
-analysis_results_sqrt <- lapply(names(behavior_map), function(b) {
-  cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
-                                          behavior_label = b, transform_type = "sqrt")
-})
-for (res in analysis_results_sqrt) {
-  cat("----------------------------------\n")
-  cat("行为:", res$label, "\n")
-  cat("变换类型:", res$transform_label, "\n")
-  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
-  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
-}
-# for (res in analysis_results_sqrt) { print(res$plots); readline(prompt="...") }
-
-
-# 4. Box-Cox 变换 (需要 car 包)
-# 如果您没有安装 car 包，会收到提示并跳过 Box-Cox 变换
-cat("\n--- 分析结果: Box-Cox 变换 ---\n")
-analysis_results_boxcox <- lapply(names(behavior_map), function(b) {
-  cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
-                                          behavior_label = b, transform_type = "boxcox")
-})
-for (res in analysis_results_boxcox) {
-  cat("----------------------------------\n")
-  cat("行为:", res$label, "\n")
-  cat("变换类型:", res$transform_label, "\n")
-  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
-  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
-}
-# for (res in analysis_results_boxcox) { print(res$plots); readline(prompt="...") }
+# 组合所有图表 (使用 patchwork)
+Reduce(`+`, lapply(analysis_results_wilcoxon, function(x) x$plot))
