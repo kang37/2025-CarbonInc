@@ -620,3 +620,213 @@ kable(results_table,
 combined_plot <- Reduce(`+`, lapply(analysis_results_wilcoxon, function(x) x$plot))
 print(combined_plot)
 
+# 绘制前后行为打分比例。
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+# 函数：绘制行为前后选项比例图（5级李克特量表）
+plot_behavior_distribution <- function(
+    data, pre_col_str, post_col_str, behavior_label) {
+  
+  # 将字符串列名转换为符号
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+  
+  # 1. 数据准备
+  analysis_data <- data %>%
+    select(!!pre_sym, !!post_sym) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym)
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post))
+  
+  # 2. 计算各选项的频数和比例
+  dist_data <- analysis_data %>%
+    pivot_longer(
+      cols = c(Pre, Post),
+      names_to = "Period",
+      values_to = "Response"
+    ) %>%
+    group_by(Period, Response) %>%
+    summarise(Count = n(), .groups = 'drop') %>%
+    group_by(Period) %>%
+    mutate(
+      Proportion = Count / sum(Count) * 100,
+      Label = paste0(round(Proportion, 1), "%")
+    ) %>%
+    ungroup() %>%
+    mutate(
+      Period = factor(Period, levels = c("Pre", "Post")),
+      Response = factor(Response, levels = 1:5)
+    )
+  
+  # 3. 定义颜色方案（从不同意到同意的渐变）
+  color_palette <- c(
+    "1" = "#D32F2F",  # 深红
+    "2" = "#F57C00",  # 橙色
+    "3" = "#FDD835",  # 黄色
+    "4" = "#66BB6A",  # 绿色
+    "5" = "#2E7D32"   # 深绿
+  )
+  
+  # 4. 堆叠条形图
+  p <- ggplot(dist_data, aes(x = Period, y = Proportion, fill = Response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    geom_text(
+      aes(label = ifelse(Proportion > 5, Label, "")),  # 只显示>5%的标签
+      position = position_stack(vjust = 0.5),
+      size = 3.5,
+      color = "white",
+      fontface = "bold"
+    ) +
+    scale_fill_manual(
+      values = color_palette,
+      name = "评分",
+      labels = c("1", "2", "3", "4", "5"),
+      drop = FALSE
+    ) +
+    scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
+    labs(
+      title = behavior_label,
+      y = "比例 (%)",
+      x = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+      legend.position = "right",
+      legend.text = element_text(size = 9),
+      axis.text = element_text(size = 10)
+    )
+  
+  return(p)
+}
+
+# ----------------------------------------------------------------------
+# 批量生成比例图
+distribution_plots <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  plot_behavior_distribution(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# 组合显示（使用 patchwork）
+combined_plot <- Reduce(`+`, distribution_plots) +
+  plot_layout(ncol = 2, guides = "collect")
+
+print(combined_plot)
+
+# 桑基图版本。
+library(ggsankey)  
+
+# 函数：绘制行为前后变化的桑基图
+plot_behavior_sankey <- function(
+    data, pre_col_str, post_col_str, behavior_label) {
+  
+  # 将字符串列名转换为符号
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+  
+  # 1. 数据准备
+  analysis_data <- data %>%
+    select(!!pre_sym, !!post_sym) %>%
+    mutate(
+      Pre = as.factor(as.numeric(!!pre_sym)),
+      Post = as.factor(as.numeric(!!post_sym))
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post))
+  
+  # 2. 计算流量（Pre -> Post 的转换）
+  flow_data <- analysis_data %>%
+    group_by(Pre, Post) %>%
+    summarise(Count = n(), .groups = 'drop') %>%
+    mutate(
+      Pre_label = paste0("使用前: ", Pre),
+      Post_label = paste0("使用后: ", Post)
+    )
+  
+  # 3. 转换为 ggsankey 格式
+  sankey_data <- flow_data %>%
+    make_long(Pre_label, Post_label, value = Count)
+  
+  # 4. 定义颜色方案
+  color_palette <- c(
+    "使用前: 1" = "#D32F2F", "使用后: 1" = "#D32F2F",
+    "使用前: 2" = "#F57C00", "使用后: 2" = "#F57C00",
+    "使用前: 3" = "#FDD835", "使用后: 3" = "#FDD835",
+    "使用前: 4" = "#66BB6A", "使用后: 4" = "#66BB6A",
+    "使用前: 5" = "#2E7D32", "使用后: 5" = "#2E7D32"
+  )
+  
+  # 5. 绘制桑基图
+  p <- ggplot(sankey_data, aes(
+    x = x,
+    next_x = next_x,
+    node = node,
+    next_node = next_node,
+    fill = node,
+    value = value,
+    label = node
+  )) +
+    geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.1) +
+    geom_sankey_label(size = 3, color = "black", fill = "white", alpha = 0.7) +
+    scale_fill_manual(values = color_palette) +
+    labs(
+      title = behavior_label,
+      x = NULL,
+      y = "人数"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+      legend.position = "none",
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(size = 9),
+      panel.grid = element_blank()
+    )
+  
+  return(p)
+}
+
+# ----------------------------------------------------------------------
+# 批量生成桑基图
+sankey_plots <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  plot_behavior_sankey(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# 组合显示（使用 patchwork）
+combined_sankey <- Reduce(`+`, sankey_plots) +
+  plot_layout(ncol = 2)
+
+print(combined_sankey)
+
+# ----------------------------------------------------------------------
+# 如果想在Rmarkdown中单独显示每个图
+for (i in seq_along(names(behavior_map))) {
+  b <- names(behavior_map)[i]
+  cols <- behavior_map[[b]]
+  
+  cat("\n### ", b, "\n\n")
+  
+  p <- plot_behavior_sankey(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+  
+  print(p)
+}
