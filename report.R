@@ -447,10 +447,8 @@ plot_bar_chart(data, "q19_desired_feature")
 plot_bar_chart(data, "q4_know_carbon_credit")
 
 # 具体问题 ----
-# 检验使用APP的用户在用之前和之后行为的差异。
 # ====================================================================
-# 增强版：analyze_behavior_change 函数 (含正态性检验和数据变换选项)
-# ====================================================================
+# 增强版：analyze_behavior_change 函数 (含正态性检验和多种数据变换选项)
 
 #' 分析低碳APP使用前后行为差异 (配对t检验，含正态性检验和数据变换选项)
 #' 
@@ -458,11 +456,15 @@ plot_bar_chart(data, "q4_know_carbon_credit")
 #' @param pre_col_str 使用前行为的列名字符串。
 #' @param post_col_str 使用后行为的列名字符串。
 #' @param behavior_label 行为的描述标签。
-#' @param transform_data 逻辑值，是否对差异分数进行平方根变换。
+#' @param transform_type 字符串，指定数据变换类型。可选值：
+#'                       - NULL 或 "none": 不进行变换 (默认)。
+#'                       - "log": 对数变换 (需要数据为正，可能进行平移)。
+#'                       - "sqrt": 平方根变换 (需要数据为非负，可能进行平移)。
+#'                       - "boxcox": Box-Cox 变换 (需要数据为正，可能进行平移)。
 #'                       (注意：对Likert数据进行变换解释性会降低，非参数检验通常更优)
 #' @return 包含配对t检验结果、正态性检验结果和可视化图表的列表。
-analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_str, behavior_label, 
-                                                   transform_data = FALSE) { # 新增参数
+analyze_behavior_change_with_transforms <- function(data, pre_col_str, post_col_str, behavior_label, 
+                                                    transform_type = NULL) { 
   
   pre_sym <- sym(pre_col_str)
   post_sym <- sym(post_col_str)
@@ -477,41 +479,76 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
     ) %>%
     filter(!is.na(Pre) & !is.na(Post))
   
-  # 2. **数据变换 (如果 transform_data = TRUE)**
+  # 2. **数据变换**
   transformed_difference <- analysis_data$Difference
   transform_type_label <- "原始"
+  shift_val <- 0 # 用于记录平移量
   
-  if (transform_data) {
-    # 平方根变换需要所有值非负。如果存在负差异，需要先平移。
-    # 找到最小差异值，将其变为非负。
+  if (!is.null(transform_type) && transform_type != "none") {
     min_diff <- min(analysis_data$Difference)
-    if (min_diff < 0) {
+    
+    # 确保数据为正数才能进行对数或 Box-Cox 变换
+    if (min_diff <= 0 && transform_type %in% c("log", "boxcox")) {
       shift_val <- abs(min_diff) + 1 # 确保所有值都 > 0
-      transformed_difference <- sqrt(analysis_data$Difference + shift_val)
-      transform_type_label <- paste0("平方根(平移", shift_val, ")")
+      temp_diff_for_transform <- analysis_data$Difference + shift_val
+      transform_type_label <- paste0(transform_type, "(平移", shift_val, ")")
+    } else if (min_diff < 0 && transform_type == "sqrt") { # 平方根只需要非负
+      shift_val <- abs(min_diff) # 确保所有值都 >= 0
+      temp_diff_for_transform <- analysis_data$Difference + shift_val
+      transform_type_label <- paste0(transform_type, "(平移", shift_val, ")")
     } else {
-      transformed_difference <- sqrt(analysis_data$Difference)
-      transform_type_label <- "平方根"
+      temp_diff_for_transform <- analysis_data$Difference
+      transform_type_label <- transform_type
+    }
+    
+    if (transform_type == "log") {
+      transformed_difference <- log(temp_diff_for_transform)
+    } else if (transform_type == "sqrt") {
+      transformed_difference <- sqrt(temp_diff_for_transform)
+    } else if (transform_type == "boxcox") {
+      # Box-Cox 变换需要安装 car 包
+      if (!requireNamespace("car", quietly = TRUE)) {
+        stop("请安装 'car' 包以使用 Box-Cox 变换: install.packages('car')")
+      }
+      # Box-Cox 只能处理单列数据，且不能有 NA
+      # 这里使用 powerTransform 寻找最佳 lambda
+      # 注意：powerTransform 在数据完全不偏时可能失败，或者建议不变换
+      bc_transform <- tryCatch({
+        car::powerTransform(temp_diff_for_transform)
+      }, error = function(e) {
+        warning(paste0("Box-Cox 变换失败或不适用 (", behavior_label, "): ", e$message, ". 使用原始数据进行检验。"))
+        return(NULL)
+      })
+      
+      if (!is.null(bc_transform)) {
+        lambda <- bc_transform$lambda
+        transformed_difference <- (temp_diff_for_transform^lambda - 1) / lambda
+        transform_type_label <- paste0("Box-Cox(lambda=", round(lambda, 2), ", 平移", shift_val, ")")
+      } else {
+        # 如果 Box-Cox 失败，则不进行变换
+        transformed_difference <- analysis_data$Difference
+        transform_type_label <- "原始 (Box-Cox 失败)"
+        transform_type <- "none" # 标记为未变换
+      }
+      
+    } else {
+      warning("未知的数据变换类型，将不进行变换。")
+      transform_type_label <- "原始 (未知变换类型)"
+      transform_type <- "none" # 标记为未变换
     }
   }
   
   # 3. **正态性检验 (Shapiro-Wilk) - 对变换后的差异分数**
   shapiro_result <- shapiro.test(transformed_difference)
   
-  # 4. 配对 T 检验 - 对变换后的差异分数
-  # 这里我们实际上是对变换后的“差异”与“零”进行单样本 t 检验。
-  # 也可以直接对变换后的 Post 和 Pre 进行配对 t 检验，但这在解释上更复杂。
-  # t.test(transformed_difference, mu = 0, alternative = "greater")
-  # 鉴于我们想保持与原始配对t检验的框架一致，我们对原始分数进行t检验，
-  # 但其有效性依赖于变换后差异的正态性。
-  # 注意：配对t检验的本质是检验差异分数的均值是否为0。
+  # 4. 配对 T 检验 - 对变换后的差异分数 (单样本 t 检验 H0: 均值=0)
   t_result <- t.test(
-    transformed_difference, # 对变换后的差异分数进行单样本t检验，检验均值是否为0
+    transformed_difference, 
     mu = 0, 
     alternative = "greater" 
   )
   
-  # 5. 数据可视化准备 (条形图仍显示原始均值)
+  # 5. 可视化：条形图展示原始均值差异
   plot_data_mean <- analysis_data %>%
     pivot_longer(
       cols = c(Pre, Post), 
@@ -521,7 +558,6 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
     group_by(Period) %>%
     summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop')
   
-  # 6. 可视化：条形图展示原始均值差异
   p_mean_bar <- ggplot(plot_data_mean, aes(x = Period, y = Mean_Score, fill = Period)) +
     geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
     geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 4) +
@@ -536,10 +572,10 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 7. 可视化：差异分数直方图 (显示变换后的分布)
+  # 6. 可视化：差异分数直方图 (显示变换后的分布)
   p_diff_hist <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
                         aes(x = Transformed_Difference)) +
-    geom_histogram(binwidth = if(transform_data) 0.1 else 1, fill = "lightblue", color = "black", na.rm = TRUE) +
+    geom_histogram(fill = "lightblue", color = "black", na.rm = TRUE, bins = 30) + # 增加 bins 参数
     geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
     labs(
       title = paste0(behavior_label, " - 差异分布 (", transform_type_label, ")"),
@@ -549,7 +585,7 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   
-  # 8. 可视化：差异分数 QQ 图 (显示变换后的分布)
+  # 7. 可视化：差异分数 QQ 图 (显示变换后的分布)
   p_diff_qq <- ggplot(data.frame(Transformed_Difference = transformed_difference), 
                       aes(sample = Transformed_Difference)) +
     stat_qq() +
@@ -569,10 +605,10 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
     label = behavior_label,
     t_test = t_result,
     shapiro_test = shapiro_result,
-    transform_applied = transform_data,
+    transform_applied = !is.null(transform_type) && transform_type != "none",
     transform_label = transform_type_label,
-    original_mean_difference = mean(analysis_data$Difference, na.rm = TRUE), # 返回原始均值差异
-    transformed_mean = t_result$estimate, # 变换后的差异均值
+    original_mean_difference = mean(analysis_data$Difference, na.rm = TRUE),
+    transformed_mean = t_result$estimate,
     original_mean_score_pre = mean(analysis_data$Pre, na.rm = TRUE),
     original_mean_score_post = mean(analysis_data$Post, na.rm = TRUE),
     plots = combined_plots,
@@ -589,70 +625,75 @@ analyze_behavior_change_with_transform <- function(data, pre_col_str, post_col_s
 
 # data <- your_actual_dataframe 
 
-# 运行不进行变换的版本 (默认 transform_data = FALSE)
-cat("\n--- 原始数据分析结果 (配对t检验) ---\n")
-analysis_results_original <- lapply(names(behavior_map), function(b) {
-  cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transform(
-    data = data, 
-    pre_col_str = cols[1],
-    post_col_str = cols[2],
-    behavior_label = b,
-    transform_data = FALSE # 不进行变换
-  )
-})
+# --- 运行不同变换类型进行测试 ---
 
-for (res in analysis_results_original) {
+# 1. 不进行变换 (与上次分析结果相同)
+cat("\n--- 分析结果: 不进行变换 ---\n")
+analysis_results_none <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
+                                          behavior_label = b, transform_type = NULL)
+})
+for (res in analysis_results_none) {
   cat("----------------------------------\n")
   cat("行为:", res$label, "\n")
-  cat("原始使用前均值:", round(res$original_mean_score_pre, 2), "\n")
-  cat("原始使用后均值:", round(res$original_mean_score_post, 2), "\n")
-  cat("原始均值差异:", round(res$original_mean_difference, 2), "\n")
+  cat("变换类型:", res$transform_label, "\n")
   cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  if (res$shapiro_test$p.value < 0.05) {
-    cat("  -> 正态性假设不满足！配对t检验结果可能不可靠。\n")
-  } else {
-    cat("  -> 正态性假设满足。\n")
-  }
   cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
 }
-# 打印原始数据的图表
-# for (res in analysis_results_original) {
-#   print(res$plots)
-#   readline(prompt="按 [回车] 查看下一个原始数据图...")
-# }
+# for (res in analysis_results_none) { print(res$plots); readline(prompt="...") }
 
 
-# 运行进行平方根变换的版本
-cat("\n--- 平方根变换数据分析结果 (配对t检验) ---\n")
-analysis_results_transformed <- lapply(names(behavior_map), function(b) {
+# 2. 对数变换
+cat("\n--- 分析结果: 对数变换 ---\n")
+analysis_results_log <- lapply(names(behavior_map), function(b) {
   cols <- behavior_map[[b]]
-  analyze_behavior_change_with_transform(
-    data = data, 
-    pre_col_str = cols[1],
-    post_col_str = cols[2],
-    behavior_label = b,
-    transform_data = TRUE # 进行平方根变换
-  )
+  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
+                                          behavior_label = b, transform_type = "log")
 })
-
-for (res in analysis_results_transformed) {
+for (res in analysis_results_log) {
   cat("----------------------------------\n")
   cat("行为:", res$label, "\n")
-  cat("原始使用前均值:", round(res$original_mean_score_pre, 2), "\n")
-  cat("原始使用后均值:", round(res$original_mean_score_post, 2), "\n")
-  cat("原始均值差异:", round(res$original_mean_difference, 2), "\n")
-  cat("Shapiro-Wilk P 值 (", res$transform_label, "差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
-  if (res$shapiro_test$p.value < 0.05) {
-    cat("  -> 正态性假设不满足！变换后的配对t检验结果可能仍不可靠。\n")
-  } else {
-    cat("  -> 正态性假设满足 (变换后)。\n")
-  }
-  cat("变换后配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+  cat("变换类型:", res$transform_label, "\n")
+  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
   cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
+  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
 }
-# 打印变换后的图表
-# for (res in analysis_results_transformed) {
-#   print(res$plots)
-#   readline(prompt="按 [回车] 查看下一个变换后数据图...")
-# }
+# for (res in analysis_results_log) { print(res$plots); readline(prompt="...") }
+
+
+# 3. 平方根变换 (与上次尝试类似)
+cat("\n--- 分析结果: 平方根变换 ---\n")
+analysis_results_sqrt <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
+                                          behavior_label = b, transform_type = "sqrt")
+})
+for (res in analysis_results_sqrt) {
+  cat("----------------------------------\n")
+  cat("行为:", res$label, "\n")
+  cat("变换类型:", res$transform_label, "\n")
+  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
+  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
+  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+}
+# for (res in analysis_results_sqrt) { print(res$plots); readline(prompt="...") }
+
+
+# 4. Box-Cox 变换 (需要 car 包)
+# 如果您没有安装 car 包，会收到提示并跳过 Box-Cox 变换
+cat("\n--- 分析结果: Box-Cox 变换 ---\n")
+analysis_results_boxcox <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_change_with_transforms(data = data, pre_col_str = cols[1], post_col_str = cols[2], 
+                                          behavior_label = b, transform_type = "boxcox")
+})
+for (res in analysis_results_boxcox) {
+  cat("----------------------------------\n")
+  cat("行为:", res$label, "\n")
+  cat("变换类型:", res$transform_label, "\n")
+  cat("Shapiro-Wilk P 值 (差异分数):", format.pval(res$shapiro_test$p.value, digits = 4), "\n")
+  cat("变换后差异均值:", round(res$transformed_mean, 4), "\n")
+  cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
+}
+# for (res in analysis_results_boxcox) { print(res$plots); readline(prompt="...") }
