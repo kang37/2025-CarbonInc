@@ -447,6 +447,7 @@ plot_bar_chart(data, "q19_desired_feature")
 plot_bar_chart(data, "q4_know_carbon_credit")
 
 # 具体问题 ----
+## 行为变化 ----
 # APP使用前后行为变化。
 library(dplyr)
 library(tidyr)
@@ -1113,3 +1114,196 @@ for (res in three_group_results) {
   }
 }
 
+## 环保意识 ----
+# 函数：比较APP用户和非用户的环保意识差异
+compare_environmental_awareness <- function(data, awareness_vars) {
+  
+  results_list <- lapply(names(awareness_vars), function(var_name) {
+    col_name <- awareness_vars[[var_name]]
+    
+    # 提取APP用户数据
+    used_data <- data %>%
+      filter(q1_used_app == 1) %>%
+      select(score = all_of(col_name)) %>%
+      mutate(score = as.numeric(score)) %>%
+      filter(!is.na(score))
+    
+    # 提取非APP用户数据
+    not_used_data <- data %>%
+      filter(q1_used_app != 1) %>%
+      select(score = all_of(col_name)) %>%
+      mutate(score = as.numeric(score)) %>%
+      filter(!is.na(score))
+    
+    # 合并数据用于检验
+    combined_data <- bind_rows(
+      used_data %>% mutate(group = "APP用户"),
+      not_used_data %>% mutate(group = "非APP用户")
+    )
+    
+    # Mann-Whitney U 检验
+    wilcox_result <- wilcox.test(
+      score ~ group,
+      data = combined_data,
+      alternative = "two.sided",
+      exact = FALSE
+    )
+    
+    # 计算描述性统计
+    n_used <- nrow(used_data)
+    n_not_used <- nrow(not_used_data)
+    
+    mean_used <- mean(used_data$score, na.rm = TRUE)
+    mean_not_used <- mean(not_used_data$score, na.rm = TRUE)
+    
+    median_used <- median(used_data$score, na.rm = TRUE)
+    median_not_used <- median(not_used_data$score, na.rm = TRUE)
+    
+    sd_used <- sd(used_data$score, na.rm = TRUE)
+    sd_not_used <- sd(not_used_data$score, na.rm = TRUE)
+    
+    # 计算效应量 (Cohen's d)
+    pooled_sd <- sqrt(((n_used - 1) * sd_used^2 + (n_not_used - 1) * sd_not_used^2) / 
+                        (n_used + n_not_used - 2))
+    cohen_d <- (mean_used - mean_not_used) / pooled_sd
+    
+    # 效应量分类
+    effect_label <- ifelse(abs(cohen_d) < 0.2, "忽略不计",
+                           ifelse(abs(cohen_d) < 0.5, "小",
+                                  ifelse(abs(cohen_d) < 0.8, "中", "大")))
+    
+    # 显著性标记
+    if (wilcox_result$p.value < 0.001) {
+      sig_label <- "***"
+    } else if (wilcox_result$p.value < 0.01) {
+      sig_label <- "**"
+    } else if (wilcox_result$p.value < 0.05) {
+      sig_label <- "*"
+    } else {
+      sig_label <- "ns"
+    }
+    
+    # 返回结果
+    data.frame(
+      环保意识维度 = var_name,
+      APP用户样本量 = n_used,
+      APP用户均值 = round(mean_used, 3),
+      APP用户中位数 = round(median_used, 2),
+      APP用户标准差 = round(sd_used, 3),
+      非用户样本量 = n_not_used,
+      非用户均值 = round(mean_not_used, 3),
+      非用户中位数 = round(median_not_used, 2),
+      非用户标准差 = round(sd_not_used, 3),
+      均值差异 = round(mean_used - mean_not_used, 3),
+      中位数差异 = round(median_used - median_not_used, 2),
+      Mann_Whitney_U = round(wilcox_result$statistic, 2),
+      P值 = format.pval(wilcox_result$p.value, digits = 3),
+      Cohen_d = round(cohen_d, 3),
+      效应量 = effect_label,
+      显著性 = sig_label,
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  # 合并所有结果
+  do.call(rbind, results_list)
+}
+
+# 定义环保意识相关变量
+awareness_variables <- list(
+  "碳积分知晓度" = "q4_know_carbon_credit",
+  "垃圾分类知晓度" = "q6_know_garbage_sort",
+  "社交媒体影响" = "q8_social_media_influence"
+)
+
+# 执行分析
+awareness_comparison <- compare_environmental_awareness(
+  data = data,
+  awareness_vars = awareness_variables
+)
+
+# 打印美化表格
+kable(awareness_comparison,
+      format = "html",
+      caption = "APP用户 vs 非用户的环保意识对比分析",
+      align = c('l', rep('c', 15))) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = TRUE,
+    position = "center",
+    font_size = 11
+  )
+
+# 可视化：箱线图对比
+plot_awareness_comparison <- function(data, col_name, var_label) {
+  
+  # 准备数据
+  plot_data <- data %>%
+    mutate(
+      score = as.numeric(.data[[col_name]]),
+      group = ifelse(q1_used_app == 1, "APP用户", "非APP用户")
+    ) %>%
+    filter(!is.na(score)) %>%
+    mutate(group = factor(group, levels = c("APP用户", "非APP用户")))
+  
+  # 统计检验
+  wilcox_result <- wilcox.test(score ~ group, data = plot_data, exact = FALSE)
+  
+  # 显著性标记
+  if (wilcox_result$p.value < 0.001) {
+    sig_label <- "***"
+  } else if (wilcox_result$p.value < 0.01) {
+    sig_label <- "**"
+  } else if (wilcox_result$p.value < 0.05) {
+    sig_label <- "*"
+  } else {
+    sig_label <- "ns"
+  }
+  
+  # 绘图
+  p <- ggplot(plot_data, aes(x = group, y = score, fill = group)) +
+    geom_boxplot(alpha = 0.7, width = 0.5, outlier.shape = NA) +
+    geom_jitter(alpha = 0.3, width = 0.2, size = 1) +
+    stat_summary(
+      fun = mean,
+      geom = "point",
+      shape = 23,
+      size = 3,
+      fill = "red",
+      color = "black"
+    ) +
+    scale_fill_manual(values = c("APP用户" = "#86EFAC", "非APP用户" = "#93C5FD")) +
+    labs(
+      title = var_label,
+      subtitle = paste0("p ", ifelse(wilcox_result$p.value < 0.001, "< 0.001",
+                                     paste("=", round(wilcox_result$p.value, 3)))),
+      y = "评分",
+      x = NULL
+    ) +
+    ylim(min(plot_data$score) - 0.5, max(plot_data$score) + 0.5) +
+    annotate("text", x = 1.5, y = max(plot_data$score) + 0.3, 
+             label = sig_label, size = 8) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "none"
+    )
+  
+  return(p)
+}
+
+# 生成所有可视化
+awareness_plots <- lapply(names(awareness_variables), function(var_name) {
+  plot_awareness_comparison(
+    data = data,
+    col_name = awareness_variables[[var_name]],
+    var_label = var_name
+  )
+})
+
+# 组合图表
+combined_awareness_plot <- Reduce(`+`, awareness_plots) +
+  plot_layout(ncol = 3)
+
+print(combined_awareness_plot)
