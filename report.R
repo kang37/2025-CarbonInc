@@ -448,6 +448,14 @@ plot_bar_chart(data, "q4_know_carbon_credit")
 
 # 具体问题 ----
 # APP使用前后行为变化。
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+
+# APP使用前后行为变化分析函数（改进版）
 analyze_behavior_change_wilcoxon <- function(
     data, pre_col_str, post_col_str, behavior_label) {
   
@@ -458,7 +466,6 @@ analyze_behavior_change_wilcoxon <- function(
   # 1. 数据准备与清洗
   analysis_data <- data %>%
     select(!!pre_sym, !!post_sym) %>%
-    # 确保列是数值型（Wilcoxon和t.test都要求数值型）
     mutate(
       Pre = as.numeric(!!pre_sym),
       Post = as.numeric(!!post_sym),
@@ -466,64 +473,108 @@ analyze_behavior_change_wilcoxon <- function(
     ) %>%
     filter(!is.na(Pre) & !is.na(Post))
   
-  # 2. **Wilcoxon 符号秩检验 (统计上更严谨)**
-  # 检验 H0: 中位数差异 = 0 (APP无效) vs Ha: 中位数差异 > 0 (APP有效)
+  # 样本量
+  n <- nrow(analysis_data)
+  
+  # 2. Wilcoxon 符号秩检验
   wilcox_result <- wilcox.test(
     analysis_data$Post, 
     analysis_data$Pre, 
     paired = TRUE, 
     alternative = "greater",
-    # 启用精确 p 值计算（如果样本量不大于 50）或使用校正
-    exact = FALSE, # 设置为 FALSE 使用正态近似或连续性校正
+    exact = FALSE,
     correct = TRUE
   )
   
-  # 3. 数据可视化准备
+  # 3. 计算效应量 (Cohen's d)
+  mean_diff <- mean(analysis_data$Difference, na.rm = TRUE)
+  sd_diff <- sd(analysis_data$Difference, na.rm = TRUE)
+  cohen_d <- mean_diff / sd_diff
+  
+  # 效应量分类
+  effect_size_label <- ifelse(abs(cohen_d) < 0.2, "忽略不计",
+                              ifelse(abs(cohen_d) < 0.5, "小",
+                                     ifelse(abs(cohen_d) < 0.8, "中", "大")))
+  
+  # 4. 数据可视化准备（添加标准误）
   plot_data <- analysis_data %>%
-    # 转换为长格式以便ggplot绘图
     pivot_longer(
       cols = c(Pre, Post), 
       names_to = "Period", 
       values_to = "Score"
     ) %>%
     group_by(Period) %>%
-    # 仅展示均值，但您也可以选择展示中位数
-    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop')
+    summarise(
+      Mean_Score = mean(Score, na.rm = TRUE),
+      SE = sd(Score, na.rm = TRUE) / sqrt(n()),  # 标准误
+      .groups = 'drop'
+    )
   
-  # 4. 可视化：条形图展示均值差异
+  # 5. 显著性标记
+  if (wilcox_result$p.value < 0.001) {
+    sig_label <- "***"
+  } else if (wilcox_result$p.value < 0.01) {
+    sig_label <- "**"
+  } else if (wilcox_result$p.value < 0.05) {
+    sig_label <- "*"
+  } else {
+    sig_label <- "ns"
+  }
+  
+  # 6. 改进的可视化
   p <- ggplot(plot_data, aes(x = Period, y = Mean_Score, fill = Period)) +
-    geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
-    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 4) +
-    scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
-    labs(
-      title = paste0(behavior_label),
-      y = "行为平均分",
-      x = "时期",
-      fill = "时期"
+    geom_bar(stat = "identity", position = "dodge", alpha = 0.8, width = 0.6) +
+    geom_errorbar(
+      aes(ymin = Mean_Score - SE, ymax = Mean_Score + SE),
+      width = 0.2, position = position_dodge(0.6)
     ) +
-    lims(y = c(0, 6)) +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -1.5, size = 4) +
+    scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
+    scale_fill_manual(values = c("Pre" = "#93C5FD", "Post" = "#86EFAC")) +
+    labs(
+      title = behavior_label,
+      subtitle = paste0("p ", ifelse(wilcox_result$p.value < 0.001, "< 0.001", 
+                                     paste("=", round(wilcox_result$p.value, 3)))),
+      y = "行为平均分 (± SE)",
+      x = NULL
+    ) +
+    ylim(0, max(plot_data$Mean_Score + plot_data$SE) * 1.3) +  # 动态Y轴
+    annotate(
+      "text", 
+      x = 1.5, 
+      y = max(plot_data$Mean_Score + plot_data$SE) * 1.15,
+      label = sig_label, 
+      size = 8
+    ) +
     theme_minimal() +
-    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "none"  # 移除冗余图例
+    )
   
-  # 5. 估计（中位数或均值）差异
-  # 对于Wilcoxon，我们报告中位数差异（虽然报告均值变化也是可以接受的展示方式）
+  # 7. 估计差异
   median_diff <- median(analysis_data$Difference, na.rm = TRUE)
   
   return(list(
     label = behavior_label,
+    n = n,
     test_result = wilcox_result,
     plot = p,
     median_difference = median_diff,
+    mean_difference = mean_diff,
     mean_score_pre = plot_data$Mean_Score[plot_data$Period == "Pre"],
-    mean_score_post = plot_data$Mean_Score[plot_data$Period == "Post"]
+    mean_score_post = plot_data$Mean_Score[plot_data$Period == "Post"],
+    cohen_d = cohen_d,
+    effect_size_label = effect_size_label,
+    significance = sig_label
   ))
 }
 
 # ----------------------------------------------------------------------
-# 批量分析与结果汇总 (调整打印以适应新函数输出)
+# 批量分析
 analysis_results_wilcoxon <- lapply(names(behavior_map), function(b) {
   cols <- behavior_map[[b]]
-  # 请务必将 data = data 替换为您的实际数据框名称
   analyze_behavior_change_wilcoxon(
     data = data, 
     pre_col_str = cols[1],
@@ -532,15 +583,40 @@ analysis_results_wilcoxon <- lapply(names(behavior_map), function(b) {
   )
 })
 
-# 汇总统计结果（打印 P 值和均值差异）
-for (res in analysis_results_wilcoxon) {
-  cat("----------------------------------\n")
-  cat("行为:", res$label, "\n")
-  cat("使用前均值:", round(res$mean_score_pre, 2), "\n")
-  cat("使用后均值:", round(res$mean_score_post, 2), "\n")
-  cat("中位数差异:", round(res$median_difference, 2), "\n")
-  cat("Wilcoxon 符号秩检验 P 值:", format.pval(res$test_result$p.value, digits = 4), "\n")
-}
+# ----------------------------------------------------------------------
+# 改进5：使用表格汇总结果
+results_table <- do.call(rbind, lapply(analysis_results_wilcoxon, function(res) {
+  data.frame(
+    行为 = res$label,
+    样本量 = res$n,
+    使用前均值 = round(res$mean_score_pre, 2),
+    使用后均值 = round(res$mean_score_post, 2),
+    均值差异 = round(res$mean_difference, 2),
+    中位数差异 = round(res$median_difference, 2),
+    P值 = format.pval(res$test_result$p.value, digits = 3),
+    Cohen_d = round(res$cohen_d, 3),
+    效应量 = res$effect_size_label,
+    显著性 = res$significance,
+    stringsAsFactors = FALSE
+  )
+}))
 
+# 打印表格
+kable(results_table, 
+      format = "html",
+      caption = "APP使用前后行为变化分析结果汇总",
+      align = c('l', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c')) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  column_spec(10, bold = TRUE) %>%  # 显著性列加粗
+  row_spec(which(results_table$显著性 %in% c("*", "**", "***")), 
+           background = "#D4EDDA")  # 显著结果高亮
+
+# ----------------------------------------------------------------------
 # 组合所有图表 (使用 patchwork)
-Reduce(`+`, lapply(analysis_results_wilcoxon, function(x) x$plot))
+combined_plot <- Reduce(`+`, lapply(analysis_results_wilcoxon, function(x) x$plot))
+print(combined_plot)
+
