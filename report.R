@@ -5,9 +5,6 @@ library(dplyr)
 library(showtext)
 showtext_auto()
 
-# 读取数据（如果你尚未读取）
-data <- read_excel("data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx")
-
 question_map <- c(
   "id" = "序号",
   "submit_time" = "提交答卷时间",
@@ -97,10 +94,7 @@ question_map <- c(
   "q20_cumulative_inspire" = "28 当我看到累计的碳减排成效，我更愿意维持低碳行为。",
   "q21_suggestion" = "29 感谢您对本次调查的支持，您可以在下方写下您对低碳减排APP或者碳普惠的想法或建议。"
 )
-# 重命名变量
-data <- data %>% rename(!!!question_map)
 
-# 基本情况饼图 ----
 # 定义需要生成饼图的变量名（与数据框中的列名对应）
 variables <- c(
   "gender", "age", "education", "marital_status", "housing_sqm",
@@ -108,9 +102,61 @@ variables <- c(
   "car_ownership"
 )
 
-# Bug: 转化数据类型。
-data <- data %>% mutate(across(all_of(variables), factor))
+# 重命名变量
+data <- 
+  read_excel(
+    "data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx"
+  ) %>% 
+  rename(!!!question_map) %>% 
+  mutate(across(all_of(variables), factor)) %>% 
+  mutate(
+    # --- 请根据您的数据字典（问卷选项）修改 "1" = "???" 的映射 ---
+    
+    # 1. 性别 (假设 1=男, 2=女)
+    gender = recode_factor(gender,
+                           "1" = "男",
+                           "2" = "女",
+                           .default = "其他/未填" # .default 会处理 NA 或未在上面列出的值
+    ),
+    
+    # 2. 婚姻状况 (假设 1=未婚, 2=已婚, 3=...)
+    marital_status = recode_factor(marital_status,
+                                   "1" = "未婚",
+                                   "2" = "已婚",
+                                   "3" = "离异/丧偶",
+                                   .default = "其他/未填"
+    ),
+    
+    # 3. 汽车拥有量 (假设 0=0辆, 1=1辆, 2=2辆, 3=3辆及以上)
+    car_ownership = recode_factor(car_ownership,
+                                  "0" = "0辆",
+                                  "1" = "1辆",
+                                  "2" = "2辆",
+                                  "3" = "3辆及以上",
+                                  .default = "其他/未填"
+    ),
+    
+    # 4. 家庭同住人口 (假设 0=0人, 1=1人 ...)
+    family_other_pop = recode_factor(family_other_pop,
+                                     "0" = "0人",
+                                     "1" = "1人",
+                                     "2" = "2人",
+                                     "3" = "3人",
+                                     "4" = "4人及以上",
+                                     .default = "其他/未填"
+    ),
+    
+    # --- 对于已经是描述性文本的变量 (如 年龄段)，直接转为因子 ---
+    
+    age = factor(age),
+    education = factor(education),
+    housing_sqm = factor(housing_sqm),
+    monthly_income_personal = factor(monthly_income_personal),
+    monthly_income_family = factor(monthly_income_family),
+    residence_area = factor(residence_area)
+  )
 
+# 基本情况饼图 ----
 # 定义对应的图表标题
 titles <- c(
   "性别比例", "年龄段比例", "教育程度比例", "婚姻状况比例", "住房面积比例",
@@ -168,9 +214,8 @@ create_pie_chart_academic <- function(data, variable_name_str, title, n_to_keep 
     coord_polar("y", start = 0) +
     # **应用学术配色：使用 'Set1', 'Pastel1', 或 'Dark2' 等**
     scale_fill_brewer(palette = "Set2") +
-    
     # 移除不必要的元素
-    labs(title = title, fill = title) +
+    labs(fill = title) +
     theme_void() +
     theme(
       plot.title = element_text(hjust = 0.5, size = 10, face = "bold"),
@@ -195,7 +240,6 @@ titles <- c(
   "个人月收入比例", "家庭月收入比例", "家庭同住其他人口数量比例",
   "汽车拥有量比例", "居住区域比例"
 )
-data <- data %>% mutate(across(all_of(variables), factor))
 
 # 批量生成饼图 (使用 lapply)
 pie_charts_list_academic <- lapply(
