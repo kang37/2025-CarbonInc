@@ -717,18 +717,58 @@ bar_ls_q20 <- bar_plot_list(
 Reduce(`+`, bar_ls_q20) + plot_layout(ncol = 3)
 
 # (修改) 希望获得的具体奖励。
-# (使用 plot_bar_chart, 传入 title, x_lab, 并按计数排序)
-plot_bar_chart(
-  data, 
-  "q14_desired_reward", 
-  title = "最希望获得的奖励类型", 
-  x_lab = "奖励类型",
-  sort_by_count = TRUE # 开启按数量排序
-)
+# --- 改进：Q14 (最希望获得的奖励) ---
+# (已根据截图修正：使用 1-6 数字代码进行重编码)
+
+# 1. 数据处理与汇总
+q14_summary <- data %>%
+  # 筛选出 "q14_desired_reward" 列，并移除 NA
+  filter(!is.na(q14_desired_reward)) %>%
+  # 按奖励类型分组并计数
+  count(q14_desired_reward, name = "Count") %>%
+  
+  # *** 关键改进：将原始列(可能是数字1,2,3)转换为字符 "1","2","3" ***
+  # 这样 recode_factor 才能正确匹配
+  mutate(Option_Raw = as.character(q14_desired_reward))
+
+# 2. *** 关键修改：使用 "数字" = "短标签" 的方式进行映射 ***
+q14_summary <- q14_summary %>%
+  mutate(
+    Option = recode_factor(Option_Raw,
+                           # --- 映射关系基于您提供的截图 ---
+                           "1" = "公交出行优惠券",
+                           "2" = "环保主题用品",
+                           "3" = "购物代金券",
+                           "4" = "低碳徽章",
+                           "5" = "IP周边",
+                           "6" = "其他"
+                           # -----------------------------------
+                           , .default = Option_Raw # 如果有其他值，保留原样
+    )
+  )
+
+# 3. 绘制汇总条形图 (水平) - (这部分代码与之前相同)
+q14_plot <- ggplot(q14_summary, aes(x = reorder(Option, Count), y = Count)) +
+  geom_bar(stat = "identity", aes(fill = Option), show.legend = FALSE) + 
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
+  coord_flip() + 
+  labs(
+    title = "Q14: 最希望获得的奖励类型 (单选)",
+    subtitle = "按选择人数排序",
+    x = "奖励类型 (优化后标签)",
+    y = "选择人数 (计数)"
+  ) +
+  scale_y_continuous(limits = c(0, max(q14_summary$Count) * 1.15)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+print(q14_plot)
+
 
 # 障碍 ----
-# 障碍 ----
-
 # --- 针对 Q15 (多选题) 的最佳分析：汇总条形图 ---
 # 1. 定义 Q15 相关的列
 q15_cols <- c(
@@ -1318,23 +1358,6 @@ combined_sankey <- Reduce(`+`, sankey_plots) +
 
 print(combined_sankey)
 
-# ----------------------------------------------------------------------
-# 如果想在Rmarkdown中单独显示每个图
-for (i in seq_along(names(behavior_map))) {
-  b <- names(behavior_map)[i]
-  cols <- behavior_map[[b]]
-  
-  cat("\n### ", b, "\n\n")
-  
-  p <- plot_behavior_sankey(
-    data = data,
-    pre_col_str = cols[1],
-    post_col_str = cols[2],
-    behavior_label = b
-  )
-  
-  print(p)
-}
 
 # 使用APP和不使用APP的人差异是？
 library(dplyr)
