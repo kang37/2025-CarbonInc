@@ -219,16 +219,17 @@ print(final_plot_academic)
 
 # 其他列条形图 ----
 # 画出data的residence_area的分布柱状图。
+# --- 替换：更新 plot_bar_chart 函数 ---
 #' 创建分类计数条形图 (Bar Chart)
 #' 
 #' @param data 原始数据框。
 #' @param col_x 要作图的分类列名（字符串，例如 "gender"）。
 #' @param title 图表标题（字符串）。
+#' @param x_lab X轴标签（字符串）。默认为 "受访者选项"。
 #' @param sort_by_count 是否按计数大小降序排序。默认 FALSE (不排序)。
 #' @return 一个 ggplot 对象。
-plot_bar_chart <- function(data, col_x, title = "分类计数分布", sort_by_count = FALSE) {
+plot_bar_chart <- function(data, col_x, title = "分类计数分布", x_lab = "受访者选项", sort_by_count = FALSE) {
   
-  # ***关键修正：将字符串转换为符号***
   col_sym <- sym(col_x)
   
   # 1. 数据准备：过滤 NA，并计算计数
@@ -236,7 +237,6 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", sort_by_co
     filter(!is.na(!!col_sym)) %>%
     count(!!col_sym, name = "Count") 
   
-  # ***新增逻辑：根据 sort_by_count 参数决定是否排序***
   if (sort_by_count) {
     plot_data <- plot_data %>% 
       arrange(desc(Count))
@@ -246,9 +246,7 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", sort_by_co
   plot <- plot_data %>%
     ggplot() +
     geom_bar(
-      # ***关键修改：使用 if/else 决定 x 轴的排序方式***
       aes(
-        # 如果 sort_by_count 为 TRUE，则按 Count 排序
         x = if (sort_by_count) { reorder(!!col_sym, -Count) } else { !!col_sym },
         y = Count
       ), 
@@ -256,15 +254,16 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", sort_by_co
       fill = "steelblue"
     ) +
     
-    # 添加标签和主题
+    # ***关键修改：使用 x_lab 参数***
     labs(
       title = title,
-      x = col_x, # x轴标签直接使用输入的字符串
+      x = x_lab, # 使用传入的 x_lab
       y = "计数"
     ) +
-    theme_minimal() +
+    lims(y = c(0, 50)) + 
+    theme_bw() +
     theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.text.x = element_text(angle = 90, hjust = 1),
       plot.title = element_text(hjust = 0.5, face = "bold")
     )
   
@@ -272,27 +271,35 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", sort_by_co
 }
 
 # 函数：根据起始列和结束列批量生成条形图。
-bar_plot_list <- function(start_col, end_col) {
+# 新增 title_map 参数：一个命名向量, e.g. c("col_name" = "美观的标题")
+# 新增 x_axis_label 参数：传递给 plot_bar_chart 的 X 轴标签
+bar_plot_list <- function(start_col, end_col, title_map = NULL, x_axis_label = "受访者选项") {
+  
   # 1. 提取所有目标列名
-  # 使用 select() 配合 names() 获取连续的列名向量
   question_cols <- data %>%
     select(!!start_col:!!end_col) %>%
     names()
   
-  # 2. 构造对应的标题 (这部分仍然需要手动创建或根据列名生成)
-  # 由于标题无法自动生成，我们仍需一个与 question_cols 长度匹配的向量
-  # 假设我们使用列名作为简化标题
-  question_titles <- question_cols # 直接使用列名作为标题
-  
-  # 3. 批量生成图表 (使用之前定义的 plot_bar_chart 函数)
+  # 2. 批量生成图表
   bar_charts_list <- lapply(
     seq_along(question_cols),
     function(i) {
       var_name <- question_cols[i]
-      plot_title <- question_titles[i]
       
-      # 假设您的数据框名称是 data
-      p <- plot_bar_chart(data, col_x = var_name, title = plot_title)
+      # ***关键修改：使用 title_map 来获取美观的标题***
+      if (!is.null(title_map) && var_name %in% names(title_map)) {
+        plot_title <- title_map[var_name]
+      } else {
+        plot_title <- var_name # 如果映射中没有，则退回使用原始列名
+      }
+      
+      # ***关键修改：传递 x_lab 和 title***
+      p <- plot_bar_chart(
+        data, 
+        col_x = var_name, 
+        title = plot_title, 
+        x_lab = x_axis_label # 传递 x 轴标签
+      )
       return(p)
     }
   )
@@ -301,12 +308,38 @@ bar_plot_list <- function(start_col, end_col) {
 }
 
 # 和使用体验有关的改进建议。
-bar_ls_q4 <- bar_plot_list("q4_ui_simple", "q4_clear_guidance")
-Reduce(`+`, bar_ls_q4)
+# 为Q4系列问题定义更美观的标题
+q4_titles <- c(
+  "q4_ui_simple" = "界面应简洁明了",
+  "q4_integrate_platform" = "希望与常用平台打通",
+  "q4_auto_record" = "希望APP能自动记录数据",
+  "q4_clear_guidance" = "希望APP提供清晰的低碳引导"
+)
+bar_ls_q4 <- bar_plot_list(
+  "q4_ui_simple", 
+  "q4_clear_guidance", 
+  title_map = q4_titles,
+  x_axis_label = "同意程度" # 假设这是李克特量表, 否则可改为 "受访者选项"
+)
+Reduce(`+`, bar_ls_q4) + plot_layout(nrow = 1)
 
 # 和实用性有关的。
-bar_ls_q4_2 <- bar_plot_list("q4_raise_awareness", "q4_quicker_green_choice")
-Reduce(`+`, bar_ls_q4_2)
+q4_2_titles <- c(
+  "q4_raise_awareness" = "APP能提高低碳意识",
+  "q4_info_feedback_useful" = "APP提供的信息和反馈很实用",
+  "q4_quicker_green_choice" = "APP能助我更快做环保选择"
+)
+
+# 调用 bar_plot_list，传入 title_map 和 x_axis_label
+bar_ls_q4_2 <- bar_plot_list(
+  "q4_raise_awareness", 
+  "q4_quicker_green_choice",
+  title_map = q4_2_titles,
+  x_axis_label = "同意程度"
+)
+
+# 组合图表并排成一行 (3个图)
+Reduce(`+`, bar_ls_q4_2) + plot_layout(nrow = 1)
 
 # 了解“碳普惠”或“低碳减排”方面信息的主要来源。
 c(data$q5_info_source_1, data$q5_info_source_2, data$q5_info_source_3) %>% 
