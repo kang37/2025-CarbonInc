@@ -683,24 +683,118 @@ plot_bar_chart(
 )
 
 # 障碍 ----
+# 障碍 ----
 
-# (新增) Q15 标题映射
-q15_titles <- c(
+# --- 针对 Q15 (多选题) 的最佳分析：汇总条形图 ---
+# 1. 定义 Q15 相关的列
+q15_cols <- c(
+  "q15_barrier_trouble",
+  "q15_barrier_privacy",
+  "q15_barrier_low_reward",
+  "q15_barrier_unknown"
+)
+
+# 2. 定义美观的标题映射 (使用您提供的 q15_titles)
+q15_titles_map <- c(
   "q15_barrier_trouble" = "障碍: 觉得操作麻烦",
   "q15_barrier_privacy" = "障碍: 担心个人信息不安全",
   "q15_barrier_low_reward" = "障碍: 积分奖励太少",
   "q15_barrier_unknown" = "障碍: 很多人没听说过"
 )
 
-# (修改) 阻碍因素
-bar_ls_q15 <- bar_plot_list(
-  "q15_barrier_trouble", 
-  "q15_barrier_unknown",
-  title_map = q15_titles,
-  x_axis_label = "受访者选项"
-)
-# 4个图，排成一行
-Reduce(`+`, bar_ls_q15) + plot_layout(nrow = 1)
+# 3. 数据处理与汇总
+q15_summary <- data %>%
+  select(all_of(q15_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value == 1) %>%
+  group_by(Variable) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  # 映射到美观的标题
+  mutate(Option = factor(q15_titles_map[Variable], levels = q15_titles_map))
+
+# 4. 绘制汇总条形图 (水平)
+q15_summary_plot <- ggplot(q15_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
+  coord_flip() + 
+  labs(
+    title = "Q15: 阻碍人们使用APP的主要原因 (多选)",
+    subtitle = "按选择人数排序",
+    x = "障碍因素",
+    y = "选择人数 (计数)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none" # 选项已在Y轴显示，移除图例
+  )
+
+print(q15_summary_plot)
+
+
+# --- Q15 共现分析 (Heatmap) ---
+# 目标：分析哪些障碍因素经常被同时选中
+# 1. 准备 0/1 数据矩阵 (处理 NA)
+q15_matrix_data <- data %>%
+  select(all_of(q15_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  # 关键：将 NA 替换为 0 (未选中)
+  replace(is.na(.), 0)
+
+# 2. 转换为 R 矩阵
+q15_matrix <- as.matrix(q15_matrix_data)
+
+# 3. 计算共现矩阵
+co_occur_matrix_q15 <- t(q15_matrix) %*% q15_matrix
+
+# 4. 转换为长数据框 (Tidy format)
+co_occur_long_q15 <- as.data.frame(co_occur_matrix_q15) %>%
+  tibble::rownames_to_column("Option1_Var") %>%
+  pivot_longer(
+    cols = -Option1_Var,
+    names_to = "Option2_Var",
+    values_to = "Count"
+  ) %>%
+  # 应用美观的标签
+  mutate(
+    Option1 = factor(q15_titles_map[Option1_Var], levels = q15_titles_map),
+    Option2 = factor(q15_titles_map[Option2_Var], levels = q15_titles_map)
+  ) %>%
+  filter(!is.na(Option1) & !is.na(Option2))
+
+# 5. 准备绘图数据 (优化，隐藏对角线)
+q15_heatmap_data <- co_occur_long_q15 %>%
+  mutate(Count_Label = Count) %>%
+  mutate(Count = ifelse(Option1_Var == Option2_Var, NA, Count))
+
+# 6. 绘制热力图
+q15_heatmap <- ggplot(q15_heatmap_data, 
+                       aes(x = Option1, y = Option2, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count_Label), color = "black", size = 3.5) +
+  # 定义一个 "障碍" 色系 (例如从浅黄到深红)
+  scale_fill_gradient(low = "#FFF9C4", high = "#D32F2F", na.value = "grey90") +
+  labs(
+    title = "Q15: 障碍因素共现热力图",
+    subtitle = "数字表示同时选择两项的人数",
+    x = "障碍因素 (A)",
+    y = "障碍因素 (B)",
+    fill = "共现次数"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(q15_heatmap)
 
 # 行为改变 ----
 #' 分析低碳APP使用前后行为差异
@@ -1099,7 +1193,6 @@ library(ggsankey)
 # 函数：绘制行为前后变化的桑基图
 plot_behavior_sankey <- function(
     data, pre_col_str, post_col_str, behavior_label) {
-  
   # 将字符串列名转换为符号
   pre_sym <- sym(pre_col_str)
   post_sym <- sym(post_col_str)
@@ -1149,9 +1242,7 @@ plot_behavior_sankey <- function(
     geom_sankey_label(size = 3, color = "black", fill = "white", alpha = 0.7) +
     scale_fill_manual(values = color_palette) +
     labs(
-      title = behavior_label,
-      x = NULL,
-      y = "人数"
+      title = behavior_label, x = NULL, y = "人数"
     ) +
     theme_minimal() +
     theme(
