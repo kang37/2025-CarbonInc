@@ -260,7 +260,7 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", x_lab = "�
       x = x_lab, # 使用传入的 x_lab
       y = "计数"
     ) +
-    lims(y = c(0, 50)) + 
+    lims(y = c(0, 600)) + 
     theme_bw() +
     theme(
       axis.text.x = element_text(angle = 90, hjust = 1),
@@ -348,23 +348,96 @@ c(data$q5_info_source_1, data$q5_info_source_2, data$q5_info_source_3) %>%
   head(10)
 
 # 吸引点 ----
-# 当前功能中。
-bar_ls_q12 <- bar_plot_list("q12_incentive_points", "q12_incentive_data_life")
-Reduce(`+`, bar_ls_q12)
+# (新增) Q12 标题映射
+q12_titles <- c(
+  "q12_incentive_points" = "积分兑奖",
+  "q12_incentive_viz" = " 图示减排成果",
+  "q12_incentive_ui" = "简洁、易操作的界面",
+  "q12_incentive_social" = "朋友参与和社交互动",
+  "q12_incentive_game" = "有趣的任务和游戏",
+  "q12_incentive_expert_advice" = "官方或专家推荐",
+  "q12_incentive_data_life" = "与生活紧密结合的数据"
+)
 
-# 未来功能。
-bar_ls_q13 <- bar_plot_list("q13_attract_points", "q13_attract_viz_carbon")
-Reduce(`+`, bar_ls_q13)
-# 一些其他方面的促进。
-bar_ls_q20 <- bar_plot_list("q20_celeb_endorsement", "q20_cumulative_inspire")
-Reduce(`+`, bar_ls_q20)
+# (修改) 当前功能中。
+bar_ls_q12 <- bar_plot_list(
+  "q12_incentive_points", 
+  "q12_incentive_data_life",
+  title_map = q12_titles,
+  x_axis_label = "受访者选项" # 假设这是 "选中"
+)
+# 7个图，设为4列 (会自动换行)
+Reduce(`+`, bar_ls_q12) + plot_layout(ncol = 4) 
 
-# 希望获得的具体奖励。
-plot_bar_chart(data, "q14_desired_reward")
+# (新增) Q13 标题映射
+q13_titles <- c(
+  "q13_attract_points" = "吸引功能: 碳积分兑换商品",
+  "q13_attract_credit" = "吸引功能: 绿色信用积分/政策优惠",
+  "q13_attract_daily_task" = "吸引功能: 每日打卡/任务",
+  "q13_attract_ranking" = "吸引功能: 朋友排行榜/成就徽章",
+  "q13_attract_game_fun" = "吸引功能: 抽奖等娱乐性玩法",
+  "q13_attract_viz_carbon" = "吸引功能: 可视化我的碳足迹"
+)
+
+# (修改) 未来功能。
+bar_ls_q13 <- bar_plot_list(
+  "q13_attract_points", 
+  "q13_attract_viz_carbon",
+  title_map = q13_titles,
+  x_axis_label = "受访者选项"
+)
+# 6个图，设为3列
+Reduce(`+`, bar_ls_q13) + plot_layout(ncol = 3)
+
+# (新增) Q20 标题映射
+q20_titles <- c(
+  "q20_celeb_endorsement" = "明星代言会让我更关注",
+  "q20_video_intro" = "视频介绍更吸引我",
+  "q20_focus_env_vs_self" = "“环保意义”不如“个人利益”吸引我",
+  "q20_ranking_motivation" = "排行/成就会激励我",
+  "q20_image_inspire" = "图像/动画比文字更有趣",
+  "q20_cumulative_inspire" = "累计成效激励我维持行为"
+)
+
+# (修改) 一些其他方面的促进。
+bar_ls_q20 <- bar_plot_list(
+  "q20_celeb_endorsement", 
+  "q20_cumulative_inspire",
+  title_map = q20_titles,
+  x_axis_label = "同意程度" # 这些是李克特量表
+)
+# 6个图，设为3列
+Reduce(`+`, bar_ls_q20) + plot_layout(ncol = 3)
+
+# (修改) 希望获得的具体奖励。
+# (使用 plot_bar_chart, 传入 title, x_lab, 并按计数排序)
+plot_bar_chart(
+  data, 
+  "q14_desired_reward", 
+  title = "最希望获得的奖励类型", 
+  x_lab = "奖励类型",
+  sort_by_count = TRUE # 开启按数量排序
+)
 
 # 障碍 ----
-bar_ls_q15 <- bar_plot_list("q15_barrier_trouble", "q15_barrier_unknown")
-Reduce(`+`, bar_ls_q15)
+
+# (新增) Q15 标题映射
+q15_titles <- c(
+  "q15_barrier_trouble" = "障碍: 觉得操作麻烦",
+  "q15_barrier_privacy" = "障碍: 担心个人信息不安全",
+  "q15_barrier_low_reward" = "障碍: 积分奖励太少",
+  "q15_barrier_unknown" = "障碍: 很多人没听说过"
+)
+
+# (修改) 阻碍因素
+bar_ls_q15 <- bar_plot_list(
+  "q15_barrier_trouble", 
+  "q15_barrier_unknown",
+  title_map = q15_titles,
+  x_axis_label = "受访者选项"
+)
+# 4个图，排成一行
+Reduce(`+`, bar_ls_q15) + plot_layout(nrow = 1)
 
 # 行为改变 ----
 #' 分析低碳APP使用前后行为差异
