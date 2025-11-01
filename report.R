@@ -348,10 +348,21 @@ c(data$q5_info_source_1, data$q5_info_source_2, data$q5_info_source_3) %>%
   head(10)
 
 # 吸引点 ----
-# (新增) Q12 标题映射
-q12_titles <- c(
+# 1. 定义 Q12 相关的列
+q12_cols <- c(
+  "q12_incentive_points",
+  "q12_incentive_viz",
+  "q12_incentive_ui",
+  "q12_incentive_social",
+  "q12_incentive_game",
+  "q12_incentive_expert_advice",
+  "q12_incentive_data_life"
+)
+
+# 2. 定义美观的标题映射 (确保名称与 q12_cols 中的完全一致)
+q12_titles_map <- c(
   "q12_incentive_points" = "积分兑奖",
-  "q12_incentive_viz" = " 图示减排成果",
+  "q12_incentive_viz" = "图示减排成果",
   "q12_incentive_ui" = "简洁、易操作的界面",
   "q12_incentive_social" = "朋友参与和社交互动",
   "q12_incentive_game" = "有趣的任务和游戏",
@@ -359,18 +370,130 @@ q12_titles <- c(
   "q12_incentive_data_life" = "与生活紧密结合的数据"
 )
 
-# (修改) 当前功能中。
-bar_ls_q12 <- bar_plot_list(
-  "q12_incentive_points", 
-  "q12_incentive_data_life",
-  title_map = q12_titles,
-  x_axis_label = "受访者选项" # 假设这是 "选中"
-)
-# 7个图，设为4列 (会自动换行)
-Reduce(`+`, bar_ls_q12) + plot_layout(ncol = 4) 
+# 3. 数据处理与汇总
+q12_summary <- data %>%
+  # 仅选择相关的列
+  select(all_of(q12_cols)) %>%
+  # 将所有列转换为数值型 (确保 "1" 被识别为数字)
+  mutate(across(everything(), as.numeric)) %>% 
+  # 转换为长格式
+  pivot_longer(
+    cols = everything(),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  # 过滤：我们只关心被选中的 (假设 "1" = 选中)
+  filter(Value == 1) %>%
+  # 按变量名分组并计数
+  group_by(Variable) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  # 映射到美观的标题
+  # 注意：我们使用您定义的 q12_titles_map 来查找中文名
+  mutate(Option = factor(q12_titles_map[Variable], levels = q12_titles_map))
 
-# (新增) Q13 标题映射
-q13_titles <- c(
+# 4. 绘制汇总条形图 (水平)
+q12_summary_plot <- ggplot(q12_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+  geom_bar(stat = "identity") +
+  # 添加数据标签
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
+  # *** 翻转坐标轴，使长标签更易读 ***
+  coord_flip() + 
+  labs(
+    title = "Q12: 最能激励持续参与的因素 (多选)",
+    subtitle = "按选择人数排序",
+    x = "激励因素",
+    y = "选择人数 (计数)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none" # 选项已在Y轴显示，移除图例
+  )
+
+print(q12_summary_plot)
+
+# Q12共现分析。
+# 1. 准备 0/1 数据矩阵 (处理 NA)
+# (确保 q12_cols 变量在您的环境中)
+q12_matrix_data <- data %>%
+  select(all_of(q12_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  # 关键：将 NA 替换为 0 (未选中)，否则矩阵计算会失败
+  replace(is.na(.), 0)
+
+# 2. 转换为 R 矩阵
+q12_matrix <- as.matrix(q12_matrix_data)
+
+# 3. 计算共现矩阵 (矩阵乘法)
+# t(M) %*% M 得到一个 K x K 矩阵，其中 [i, j] 是 i 和 j 共同出现的次数
+co_occur_matrix <- t(q12_matrix) %*% q12_matrix
+
+# 4. 转换为长数据框 (Tidy format) 以便 ggplot 绘图
+# (确保 q12_titles_map 映射表在您的环境中)
+co_occur_long <- as.data.frame(co_occur_matrix) %>%
+  # 将行名 (变量名) 转换成一个新列
+  tibble::rownames_to_column("Option1_Var") %>%
+  # 转换为长格式
+  pivot_longer(
+    cols = -Option1_Var,
+    names_to = "Option2_Var",
+    values_to = "Count"
+  ) %>%
+  # 应用美观的标签
+  mutate(
+    Option1 = factor(q12_titles_map[Option1_Var], levels = q12_titles_map),
+    Option2 = factor(q12_titles_map[Option2_Var], levels = q12_titles_map)
+  ) %>%
+  # 过滤掉NA (防止映射失败)
+  filter(!is.na(Option1) & !is.na(Option2))
+
+# 5. 准备绘图数据 (优化)
+# 我们将对角线 (自己和自己的共现) 的值设为 NA，
+# 这样它们在图上会显示为灰色，不干扰我们对交叉项的观察
+q12_heatmap_data <- co_occur_long %>%
+  mutate(Count_Label = Count) %>%
+  mutate(Count = ifelse(Option1_Var == Option2_Var, NA, Count))
+
+# 6. 绘制热力图
+q12_heatmap <- ggplot(q12_heatmap_data, 
+                      aes(x = Option1, y = Option2, fill = Count)) +
+  # 绘制热力图格子，并添加白色边框
+  geom_tile(color = "white") +
+  # 在格子上添加共现次数的数字
+  geom_text(aes(label = Count_Label), color = "black", size = 3) +
+  # 定义一个从浅到深的填充色（na.value 用于填充对角线）
+  scale_fill_gradient(low = "#FFF3E0", high = "#E65100", na.value = "grey90") +
+  labs(
+    title = "Q12: 激励因素共现热力图",
+    subtitle = "数字表示同时选择两项的人数",
+    x = "激励因素 (A)",
+    y = "激励因素 (B)",
+    fill = "共现次数"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    # 旋转X轴标签，防止重叠
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(q12_heatmap)
+
+## Q13相关 ----
+# 1. 定义 Q13 相关的列
+q13_cols <- c(
+  "q13_attract_points",
+  "q13_attract_credit",
+  "q13_attract_daily_task",
+  "q13_attract_ranking",
+  "q13_attract_game_fun",
+  "q13_attract_viz_carbon"
+)
+
+# 2. 定义美观的标题映射 (使用您提供的 q13_titles)
+q13_titles_map <- c(
   "q13_attract_points" = "吸引功能: 碳积分兑换商品",
   "q13_attract_credit" = "吸引功能: 绿色信用积分/政策优惠",
   "q13_attract_daily_task" = "吸引功能: 每日打卡/任务",
@@ -379,16 +502,156 @@ q13_titles <- c(
   "q13_attract_viz_carbon" = "吸引功能: 可视化我的碳足迹"
 )
 
-# (修改) 未来功能。
-bar_ls_q13 <- bar_plot_list(
-  "q13_attract_points", 
-  "q13_attract_viz_carbon",
-  title_map = q13_titles,
-  x_axis_label = "受访者选项"
-)
-# 6个图，设为3列
-Reduce(`+`, bar_ls_q13) + plot_layout(ncol = 3)
+# 3. 数据处理与汇总
+q13_summary <- data %>%
+  select(all_of(q13_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value == 1) %>%
+  group_by(Variable) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
 
+# 4. 绘制汇总条形图 (水平)
+q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
+  coord_flip() + 
+  labs(
+    title = "Q13: 最能吸引您使用的功能 (多选)",
+    subtitle = "按选择人数排序",
+    x = "吸引因素",
+    y = "选择人数 (计数)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none"
+  )
+
+print(q13_summary_plot)
+
+# 1. 定义 Q13 相关的列
+q13_cols <- c(
+  "q13_attract_points",
+  "q13_attract_credit",
+  "q13_attract_daily_task",
+  "q13_attract_ranking",
+  "q13_attract_game_fun",
+  "q13_attract_viz_carbon"
+)
+
+# 2. 定义美观的标题映射 (使用您提供的 q13_titles)
+q13_titles_map <- c(
+  "q13_attract_points" = "吸引功能: 碳积分兑换商品",
+  "q13_attract_credit" = "吸引功能: 绿色信用积分/政策优惠",
+  "q13_attract_daily_task" = "吸引功能: 每日打卡/任务",
+  "q13_attract_ranking" = "吸引功能: 朋友排行榜/成就徽章",
+  "q13_attract_game_fun" = "吸引功能: 抽奖等娱乐性玩法",
+  "q13_attract_viz_carbon" = "吸引功能: 可视化我的碳足迹"
+)
+
+# 3. 数据处理与汇总
+q13_summary <- data %>%
+  select(all_of(q13_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value == 1) %>%
+  group_by(Variable) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
+
+# 4. 绘制汇总条形图 (水平)
+q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
+  coord_flip() + 
+  labs(
+    title = "Q13: 最能吸引您使用的功能 (多选)",
+    subtitle = "按选择人数排序",
+    x = "吸引因素",
+    y = "选择人数 (计数)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none"
+  )
+
+print(q13_summary_plot)
+
+# 目标：分析哪些吸引功能经常被同时选中
+# 1. 准备 0/1 数据矩阵 (处理 NA)
+q13_matrix_data <- data %>%
+  select(all_of(q13_cols)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  # 关键：将 NA 替换为 0 (未选中)
+  replace(is.na(.), 0)
+
+# 2. 转换为 R 矩阵
+q13_matrix <- as.matrix(q13_matrix_data)
+
+# 3. 计算共现矩阵
+co_occur_matrix_q13 <- t(q13_matrix) %*% q13_matrix
+
+# 4. 转换为长数据框 (Tidy format) 以便 ggplot 绘图
+# (确保 q13_titles_map 映射表在您的环境中)
+co_occur_long_q13 <- as.data.frame(co_occur_matrix_q13) %>%
+  tibble::rownames_to_column("Option1_Var") %>%
+  pivot_longer(
+    cols = -Option1_Var,
+    names_to = "Option2_Var",
+    values_to = "Count"
+  ) %>%
+  # 应用美观的标签
+  mutate(
+    Option1 = factor(q13_titles_map[Option1_Var], levels = q13_titles_map),
+    Option2 = factor(q13_titles_map[Option2_Var], levels = q13_titles_map)
+  ) %>%
+  # 过滤掉NA (防止映射失败)
+  filter(!is.na(Option1) & !is.na(Option2))
+
+# 5. 准备绘图数据 (优化，隐藏对角线)
+q13_heatmap_data <- co_occur_long_q13 %>%
+  mutate(Count_Label = Count) %>%
+  mutate(Count = ifelse(Option1_Var == Option2_Var, NA, Count))
+
+# 6. 绘制热力图
+q13_heatmap <- ggplot(q13_heatmap_data, 
+                      aes(x = Option1, y = Option2, fill = Count)) +
+  geom_tile(color = "white") +
+  # 在格子上添加共现次数的数字
+  geom_text(aes(label = Count_Label), color = "black", size = 3) +
+  # 定义一个从浅到深的填充色（na.value 用于填充对角线）
+  scale_fill_gradient(low = "#E3F2FD", high = "#0D47A1", na.value = "grey90") + # 换个色系
+  labs(
+    title = "Q13: 吸引功能共现热力图",
+    subtitle = "数字表示同时选择两项的人数",
+    x = "吸引功能 (A)",
+    y = "吸引功能 (B)",
+    fill = "共现次数"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    # 旋转X轴标签，防止重叠
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(q13_heatmap)
+
+## Q20 ----
 # (新增) Q20 标题映射
 q20_titles <- c(
   "q20_celeb_endorsement" = "明星代言会让我更关注",
