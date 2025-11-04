@@ -5,6 +5,7 @@ library(dplyr)
 library(patchwork)
 library(tidyr)
 library(showtext)
+library(ggsankey)
 showtext_auto()
 
 question_map <- c(
@@ -1933,3 +1934,324 @@ pie_ls_q20 <- pie_plot_list(
 )
 # 6个图，设为3列
 Reduce(`+`, pie_ls_q20) + plot_layout(ncol = 2)
+
+# Elder behav change ----
+# --- (新增) 步骤 0: 加载所有必需的库 ---
+# 您的脚本中缺失了这些！
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rstatix)
+library(ggsignif)   # 尽管我们用 rstatix 替代，但它有时是 rstatix 的依赖
+library(patchwork)  # 用于 wrap_plots
+library(knitr)      # 用于 kable
+
+# --- 步骤 1: 创建新的年龄分组 'age_group_3' ---
+# (此部分与您的代码相同，无需修改)
+data <- data %>%
+  mutate(
+    # 使用 case_when 创建新分组，更清晰
+    age_group_3 = case_when(
+      age %in% c("1", "2", "3") ~ "青年组 (0-30岁)",
+      age %in% c("4", "5")    ~ "中年组 (31-50岁)",
+      age == "6"              ~ "老年组 (>=51岁)",
+      TRUE                    ~ NA_character_ # 其他情况设为NA
+    )
+  ) %>%
+  # 将其转换为有序因子，确保绘图顺序正确
+  mutate(
+    age_group_3 = factor(
+      age_group_3, 
+      levels = c("青年组 (18-35岁)", "中年组 (36-50岁)", "老年组 (>50岁)")
+    )
+  )
+
+# --- (辅助函数) 执行完整分析流程 ---
+# --- (替换) 请使用这个更新后的辅助函数 ---
+#
+# (它在 "步骤 2" 中捕获了均值、差异和 N)
+#
+analyze_behavior_by_3_age_groups <- function(
+    data, 
+    pre_col_str, 
+    post_col_str, 
+    behavior_label
+) {
+  
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+  
+  # --- 数据准备 ---
+  # (此部分与您的代码相同)
+  analysis_data <- data %>%
+    filter(q1_used_app == 1) %>% 
+    select(!!pre_sym, !!post_sym, age_group_3) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post) & !is.na(age_group_3))
+  
+  # --- 步骤 2: 组内分析 (配对 Wilcoxon 检验) ---
+  #
+  # *** (已修改) 扩展 summarise 以捕获均值和 N ***
+  #
+  within_group_tests <- analysis_data %>%
+    group_by(age_group_3) %>%
+    
+    # 1. (修改) 使用 summarise() 捕获所有需要的指标
+    summarise(
+      N = n(),
+      Mean_Pre = round(mean(Pre, na.rm = TRUE), 2),
+      Mean_Post = round(mean(Post, na.rm = TRUE), 2),
+      Mean_Difference = round(mean(Difference, na.rm = TRUE), 3),
+      # (注意：我们现在访问的是 Pre 和 Post 列)
+      p = wilcox.test(Post, Pre, paired = TRUE, alternative = "greater")$p.value,
+      .groups = "drop" # 避免下游 group_by 警告
+    ) %>%
+    
+    # 2. (修改) 手动添加显著性
+    mutate(
+      p_signif = case_when(
+        p < 0.001 ~ "***",
+        p < 0.01  ~ "**",
+        p < 0.05  ~ "*",
+        TRUE ~ "ns"
+      )
+    )
+  
+  # --- 步骤 3: 组间分析 (Kruskal-Wallis + 事后检验) ---
+  # (此部分与您的代码相同)
+  between_group_kruskal <- kruskal.test(Difference ~ age_group_3, data = analysis_data)
+  
+  post_hoc_tests <- NULL
+  if (between_group_kruskal$p.value < 0.05) {
+    post_hoc_tests <- analysis_data %>%
+      rstatix::dunn_test(Difference ~ age_group_3, p.adjust.method = "bonferroni") %>%
+      rstatix::add_xy_position(x = "age_group_3")
+  }
+  
+  # --- 可视化 (a) 组内 Pre vs Post 均值对比图 ---
+  # (此部分与您的代码相同)
+  plot_within <- analysis_data %>%
+    pivot_longer(cols = c(Pre, Post), names_to = "Period", values_to = "Score") %>%
+    group_by(age_group_3, Period) %>%
+    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后"))) %>%
+    ggplot(aes(x = Period, y = Mean_Score, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5) +
+    facet_wrap(~ age_group_3) +
+    labs(
+      title = paste(behavior_label, "- 组内行为变化"),
+      y = "行为平均分"
+    ) +
+    theme_minimal() + theme(legend.position = "none")
+  
+  # --- 可视化 (b) 组间“变化幅度”对比图 (箱线图) ---
+  # (此部分与您的代码相同)
+  plot_between <- ggplot(analysis_data, aes(x = age_group_3, y = Difference, fill = age_group_3)) +
+    geom_boxplot() +
+    labs(
+      title = paste(behavior_label, "- 组间变化幅度对比"),
+      subtitle = paste0("Kruskal-Wallis P 值: ", 
+                        format.pval(between_group_kruskal$p.value, digits = 3)),
+      x = "年龄组",
+      y = "行为变化量 (使用后 - 使用前)"
+    ) +
+    theme_minimal() + theme(legend.position = "none")
+  
+  if (!is.null(post_hoc_tests)) {
+    plot_between <- plot_between + 
+      rstatix::stat_pvalue_manual(
+        post_hoc_tests, 
+        label = "p.adj.signif",
+        tip.length = 0.01,
+        hide.ns = TRUE
+      )
+  }
+  
+  # --- 可视化 (c): 组内分布变化图 (100% 堆叠条形图) ---
+  # (此部分与您的代码相同)
+  
+  # (c.1) 定义李克特 5 点量表标签 (用于图例)
+  likert_5_labels_map <- c(
+    "1" = "1 (非常不同意)", "2" = "2 (不同意)", "3" = "3 (中立)",
+    "4" = "4 (同意)", "5" = "5 (非常同意)"
+  )
+  
+  # (c.2) 准备绘图数据
+  plot_dist_data <- analysis_data %>%
+    select(Pre, Post, age_group_3) %>%
+    pivot_longer(
+      cols = c(Pre, Post), 
+      names_to = "Period", 
+      values_to = "Response"
+    ) %>%
+    mutate(Response = as.character(Response)) %>%
+    count(age_group_3, Period, Response, name = "Count") %>%
+    group_by(age_group_3, Period) %>%
+    mutate(
+      Proportion = Count / sum(Count),
+      Response_Label = recode_factor(Response, !!!likert_5_labels_map, .default = "NA")
+    ) %>%
+    ungroup() %>%
+    mutate(
+      Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后"))
+    )
+  
+  # (c.3) 定义颜色方案
+  likert_color_palette <- c(
+    "1 (非常不同意)" = "#D32F2F", "2 (不同意)" = "#F57C00", "3 (中立)" = "#FDD835",
+    "4S (同意)" = "#66BB6A", "5 (非常同意)" = "#2E7D32", "NA" = "grey"
+  )
+  
+  # (c.4) 绘制 100% 堆叠条形图
+  plot_distribution <- ggplot(plot_dist_data, 
+                              aes(x = Period, y = Proportion, fill = Response_Label)) +
+    geom_bar(stat = "identity", position = "fill") +
+    geom_text(
+      aes(label = ifelse(Proportion > 0.05, scales::percent(Proportion, accuracy = 1), "")),
+      position = position_stack(vjust = 0.5), color = "black", size = 2.5
+    ) +
+    facet_wrap(~ age_group_3) +
+    scale_fill_manual(values = likert_color_palette, name = "评分") +
+    scale_y_continuous(labels = scales::percent) +
+    labs(
+      title = paste(behavior_label, "- 组内行为分布变化"),
+      subtitle = "100% 堆叠条形图 (使用前 vs 使用后)",
+      x = NULL, y = "各选项占比"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "bottom"
+    )
+  
+  # --- 返回所有结果 ---
+  return(list(
+    label = behavior_label,
+    within_tests = within_group_tests, # <-- (现在包含均值和N)
+    between_kruskal = between_group_kruskal,
+    post_hoc = post_hoc_tests,
+    plot_within = plot_within,
+    plot_between = plot_between,
+    plot_distribution = plot_distribution
+  ))
+}
+
+# --- 批量执行所有行为的分析 ---
+# (此部分与您的代码相同，无需修改)
+# (确保 behavior_map 列表已在您的 R 脚本中定义)
+full_age_analysis_results <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_by_3_age_groups(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# --- 结果汇总与展示 ---
+
+# 1. 汇总“组内检验”结果到一张漂亮的表格
+# (此部分与您的代码相同，无需修改)
+# --- (替换) 结果汇总与展示 (生成2个新表格) ---
+
+# --- (组内分析) ---
+
+# 1. (修改) 汇总“组内检验”结果 (现在包含所有均值)
+within_results_long_table <- do.call(rbind, lapply(full_age_analysis_results, function(res) {
+  # 增加一列行为标签
+  res$within_tests$behavior <- res$label
+  res$within_tests
+})) %>%
+  # (修改) 选择所有新列
+  select(
+    behavior, age_group_3, N, Mean_Pre, Mean_Post, Mean_Difference, p, p_signif
+  ) %>%
+  # (修改) 重命名以美化
+  rename(
+    行为 = behavior, 
+    年龄组 = age_group_3, 
+    样本量 = N,
+    使用前均值 = Mean_Pre,
+    使用后均值 = Mean_Post,
+    均值差异 = Mean_Difference,
+    组内P值 = p, 
+    显著性 = p_signif
+  )
+
+cat("\n\n--- (组内分析) 表1：长表格 (包含均值、差异和P值) ---\n")
+within_results_long_table
+
+
+# 2. (新增) 创建用户要求的“宽表格”
+within_results_wide_table <- within_results_long_table %>%
+  rename(group_p = 组内P值) %>% 
+  # (新增) 创建合并的单元格文本
+  dplyr::mutate(
+    # 格式化P值，确保"ns"也包含在内
+    P_Label = case_when(
+      显著性 == "ns" ~ "ns",
+      `group_p` < 0.001 ~ "p < .001",
+      `group_p` < 0.01  ~ "p < .01",
+      `group_p` < 0.05  ~ "p < .05"
+    ),
+    Cell_Text = paste0(format(均值差异, digits = 2), " (", P_Label, ")")
+  ) %>%
+  # (新增) 仅选择塑形所需的列
+  select(行为, 年龄组, Cell_Text) %>%
+  # (新增) 塑形
+  pivot_wider(
+    names_from = 年龄组,
+    values_from = Cell_Text
+  )
+
+cat("\n\n--- (组内分析) 表2：宽表格 (格式：均值差异 (P值)) ---\n")
+knitr::kable(within_results_wide_table) 
+
+# --- (组间分析) ---
+# (此部分与您的代码相同，无需修改)
+cat("\n\n--- (组间分析) 汇总 ---\n")
+between_results_summary <- lapply(full_age_analysis_results, function(res) {
+  cat("\n\n--- (组间分析) 行为:", res$label, "---\n")
+  cat("Kruskal-Wallis 检验 P 值:", format.pval(res$between_kruskal$p.value, digits = 3), "\n")
+  if (!is.null(res$post_hoc) && nrow(res$post_hoc) > 0) {
+    cat("事后两两对比 (Bonferroni 校正):\n")
+    print(knitr::kable(res$post_hoc %>% select(group1, group2, p.adj, p.adj.signif), format = "html"))
+  } else {
+    cat("组间无显著差异，无需事后检验。\n")
+  }
+})
+
+
+# --- (可视化) ---
+# (此部分与您的代码相同，无需修改)
+
+cat("\n\n--- (可视化) 各年龄组行为“变化幅度”对比 ---\n")
+combined_between_plots <- wrap_plots(
+  lapply(full_age_analysis_results, `[[`, "plot_between"), 
+  ncol = 2
+) +
+  plot_annotation(
+    title = "各年龄组行为“变化幅度”对比",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+print(combined_between_plots)
+
+
+cat("\n\n--- (可视化) 各年龄组行为“分布变化”对比 ---\n")
+combined_distribution_plots <- wrap_plots(
+  lapply(full_age_analysis_results, `[[`, "plot_distribution"), 
+  ncol = 2 # 6 个图表，2 列
+) +
+  plot_annotation(
+    title = "各年龄组行为“分布变化”对比 (使用前 vs 使用后)",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+print(combined_distribution_plots)
+
