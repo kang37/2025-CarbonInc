@@ -2,6 +2,8 @@
 library(readxl)
 library(ggplot2)
 library(dplyr)
+library(patchwork)
+library(tidyr)
 library(showtext)
 showtext_auto()
 
@@ -154,6 +156,12 @@ data <-
     monthly_income_personal = factor(monthly_income_personal),
     monthly_income_family = factor(monthly_income_family),
     residence_area = factor(residence_area)
+  ) %>% 
+  mutate(
+    age_group = factor(
+      ifelse(age == "6", "50岁以上", "50岁及以下"),
+      levels = c("50岁及以下", "50岁以上")
+    )
   )
 
 # 基本情况饼图 ----
@@ -436,7 +444,7 @@ q12_summary <- data %>%
   mutate(Option = factor(q12_titles_map[Variable], levels = q12_titles_map))
 
 # 4. 绘制汇总条形图 (水平)
-q12_summary_plot <- ggplot(q12_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+q12_summary_plot <- ggplot(q12_summary, aes(x = reorder(Option, Count), y = Count)) +
   geom_bar(stat = "identity") +
   # 添加数据标签
   geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
@@ -538,12 +546,12 @@ q13_cols <- c(
 
 # 2. 定义美观的标题映射 (使用您提供的 q13_titles)
 q13_titles_map <- c(
-  "q13_attract_points" = "吸引功能: 碳积分兑换商品",
-  "q13_attract_credit" = "吸引功能: 绿色信用积分/政策优惠",
-  "q13_attract_daily_task" = "吸引功能: 每日打卡/任务",
-  "q13_attract_ranking" = "吸引功能: 朋友排行榜/成就徽章",
-  "q13_attract_game_fun" = "吸引功能: 抽奖等娱乐性玩法",
-  "q13_attract_viz_carbon" = "吸引功能: 可视化我的碳足迹"
+  "q13_attract_points" = "碳积分兑换商品",
+  "q13_attract_credit" = "绿色信用积分/政策优惠",
+  "q13_attract_daily_task" = "每日打卡/任务",
+  "q13_attract_ranking" = "朋友排行榜/成就徽章",
+  "q13_attract_game_fun" = "抽奖等娱乐性玩法",
+  "q13_attract_viz_carbon" = "可视化我的碳足迹"
 )
 
 # 3. 数据处理与汇总
@@ -561,61 +569,7 @@ q13_summary <- data %>%
   mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
 
 # 4. 绘制汇总条形图 (水平)
-q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
-  geom_bar(stat = "identity") +
-  geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
-  coord_flip() + 
-  labs(
-    title = "Q13: 最能吸引您使用的功能 (多选)",
-    subtitle = "按选择人数排序",
-    x = "吸引因素",
-    y = "选择人数 (计数)"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle = element_text(hjust = 0.5),
-    legend.position = "none"
-  )
-
-print(q13_summary_plot)
-
-# 1. 定义 Q13 相关的列
-q13_cols <- c(
-  "q13_attract_points",
-  "q13_attract_credit",
-  "q13_attract_daily_task",
-  "q13_attract_ranking",
-  "q13_attract_game_fun",
-  "q13_attract_viz_carbon"
-)
-
-# 2. 定义美观的标题映射 (使用您提供的 q13_titles)
-q13_titles_map <- c(
-  "q13_attract_points" = "吸引功能: 碳积分兑换商品",
-  "q13_attract_credit" = "吸引功能: 绿色信用积分/政策优惠",
-  "q13_attract_daily_task" = "吸引功能: 每日打卡/任务",
-  "q13_attract_ranking" = "吸引功能: 朋友排行榜/成就徽章",
-  "q13_attract_game_fun" = "吸引功能: 抽奖等娱乐性玩法",
-  "q13_attract_viz_carbon" = "吸引功能: 可视化我的碳足迹"
-)
-
-# 3. 数据处理与汇总
-q13_summary <- data %>%
-  select(all_of(q13_cols)) %>%
-  mutate(across(everything(), as.numeric)) %>% 
-  pivot_longer(
-    cols = everything(),
-    names_to = "Variable",
-    values_to = "Value"
-  ) %>%
-  filter(Value == 1) %>%
-  group_by(Variable) %>%
-  summarise(Count = n(), .groups = 'drop') %>%
-  mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
-
-# 4. 绘制汇总条形图 (水平)
-q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Count)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
   coord_flip() + 
@@ -696,7 +650,7 @@ q13_heatmap <- ggplot(q13_heatmap_data,
 print(q13_heatmap)
 
 ## Q20 ----
-# (新增) Q20 标题映射
+# Q20 标题映射
 q20_titles <- c(
   "q20_celeb_endorsement" = "明星代言会让我更关注",
   "q20_video_intro" = "视频介绍更吸引我",
@@ -716,10 +670,8 @@ bar_ls_q20 <- bar_plot_list(
 # 6个图，设为3列
 Reduce(`+`, bar_ls_q20) + plot_layout(ncol = 3)
 
-# (修改) 希望获得的具体奖励。
-# --- 改进：Q14 (最希望获得的奖励) ---
-# (已根据截图修正：使用 1-6 数字代码进行重编码)
-
+# Q14 ----
+# 希望获得的具体奖励。
 # 1. 数据处理与汇总
 q14_summary <- data %>%
   # 筛选出 "q14_desired_reward" 列，并移除 NA
@@ -731,7 +683,7 @@ q14_summary <- data %>%
   # 这样 recode_factor 才能正确匹配
   mutate(Option_Raw = as.character(q14_desired_reward))
 
-# 2. *** 关键修改：使用 "数字" = "短标签" 的方式进行映射 ***
+# 2. 关键修改：使用 "数字" = "短标签" 的方式进行映射
 q14_summary <- q14_summary %>%
   mutate(
     Option = recode_factor(Option_Raw,
@@ -749,13 +701,13 @@ q14_summary <- q14_summary %>%
 
 # 3. 绘制汇总条形图 (水平) - (这部分代码与之前相同)
 q14_plot <- ggplot(q14_summary, aes(x = reorder(Option, Count), y = Count)) +
-  geom_bar(stat = "identity", aes(fill = Option), show.legend = FALSE) + 
+  geom_bar(stat = "identity", show.legend = FALSE) + 
   geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
   coord_flip() + 
   labs(
     title = "Q14: 最希望获得的奖励类型 (单选)",
     subtitle = "按选择人数排序",
-    x = "奖励类型 (优化后标签)",
+    x = "奖励类型",
     y = "选择人数 (计数)"
   ) +
   scale_y_continuous(limits = c(0, max(q14_summary$Count) * 1.15)) +
@@ -778,12 +730,12 @@ q15_cols <- c(
   "q15_barrier_unknown"
 )
 
-# 2. 定义美观的标题映射 (使用您提供的 q15_titles)
+# 2. 定义美观的标题映射
 q15_titles_map <- c(
-  "q15_barrier_trouble" = "障碍: 觉得操作麻烦",
-  "q15_barrier_privacy" = "障碍: 担心个人信息不安全",
-  "q15_barrier_low_reward" = "障碍: 积分奖励太少",
-  "q15_barrier_unknown" = "障碍: 很多人没听说过"
+  "q15_barrier_trouble" = "觉得操作麻烦",
+  "q15_barrier_privacy" = "担心个人信息不安全",
+  "q15_barrier_low_reward" = "积分奖励太少",
+  "q15_barrier_unknown" = "很多人没听说过"
 )
 
 # 3. 数据处理与汇总
@@ -802,7 +754,7 @@ q15_summary <- data %>%
   mutate(Option = factor(q15_titles_map[Variable], levels = q15_titles_map))
 
 # 4. 绘制汇总条形图 (水平)
-q15_summary_plot <- ggplot(q15_summary, aes(x = reorder(Option, Count), y = Count, fill = Option)) +
+q15_summary_plot <- ggplot(q15_summary, aes(x = reorder(Option, Count), y = Count)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = Count), hjust = -0.2, size = 3.5, color = "black") +
   coord_flip() + 
@@ -822,7 +774,7 @@ q15_summary_plot <- ggplot(q15_summary, aes(x = reorder(Option, Count), y = Coun
 print(q15_summary_plot)
 
 
-# --- Q15 共现分析 (Heatmap) ---
+# Q15 共现分析 (Heatmap) ---
 # 目标：分析哪些障碍因素经常被同时选中
 # 1. 准备 0/1 数据矩阵 (处理 NA)
 q15_matrix_data <- data %>%
@@ -1834,3 +1786,150 @@ combined_awareness_plot <- Reduce(`+`, awareness_plots) +
   plot_layout(ncol = 3)
 
 print(combined_awareness_plot)
+
+# Pie charts ----
+# --- (新增) 步骤 1：重编码李克特量表 (Q4, Q20等) ---
+# 警告：这里假设 1 = 非常不同意, 5 = 非常同意。
+# 并且假设 7 点量表 (针对 Q20) 也是类似。
+# 请根据您的问卷实际情况核对并修改！
+
+# 定义李克特 5 点量表标签
+likert_5_labels <- c(
+  "1" = "非常不同意",
+  "2" = "不同意",
+  "3" = "中立",
+  "4" = "同意",
+  "5" = "非常同意"
+)
+
+# 定义李克特 7 点量表标签 (Q20 似乎是 7 点)
+likert_7_labels <- c(
+  "1" = "非常不同意",
+  "2" = "不同意",
+  "3" = "比较不同意",
+  "4" = "中立",
+  "5" = "比较同意",
+  "6" = "同意",
+  "7" = "非常同意"
+)
+
+# 识别所有 Q4 和 Q20 的列
+q4_cols_all <- data %>% select(starts_with("q4_")) %>% names()
+q20_cols_all <- data %>% select(starts_with("q20_")) %>% names()
+
+# 执行重编码
+data <- data %>%
+  mutate(
+    # 转换 Q4 系列 (5点量表)
+    across(
+      all_of(q4_cols_all), 
+      ~recode_factor(as.character(.x), !!!likert_5_labels, .default = as.character(.x))
+    ),
+    # 转换 Q20 系列 (7点量表)
+    across(
+      all_of(q20_cols_all),
+      ~recode_factor(as.character(.x), !!!likert_7_labels, .default = as.character(.x))
+    )
+  )
+
+# --- (新增) 步骤 2：创建批量绘制饼图的辅助函数 ---
+
+#' 批量创建饼图列表
+#' 
+#' @param start_col 起始列名 (字符串)。
+#' @param end_col 结束列名 (字符串)。
+#' @param title_map 标题映射 (命名向量)。
+#' @param n_to_keep 饼图中保留的扇区数 (默认为 7, 适合李克特量表)。
+#' @return ggplot 对象列表。
+pie_plot_list <- function(start_col, end_col, title_map = NULL, n_to_keep = 7) {
+  
+  # 1. 提取所有目标列名
+  question_cols <- data %>%
+    select(!!start_col:!!end_col) %>%
+    names()
+  
+  # 2. 批量生成图表
+  pie_charts_list <- lapply(
+    seq_along(question_cols),
+    function(i) {
+      var_name <- question_cols[i]
+      
+      # 获取美观的标题
+      if (!is.null(title_map) && var_name %in% names(title_map)) {
+        plot_title <- title_map[var_name]
+      } else {
+        plot_title <- var_name # 备用标题
+      }
+      
+      # *** 调用饼图函数 ***
+      p <- create_pie_chart_academic(
+        data, 
+        var_name, 
+        plot_title, 
+        n_to_keep = n_to_keep # 传入 n_to_keep
+      )
+      return(p)
+    }
+  )
+  
+  return(pie_charts_list)
+}
+
+
+# --- (替换) 步骤 3：使用 pie_plot_list 绘制 Q4, Q4_2, Q20 ---
+
+# 和使用体验有关的改进建议。
+# (标题映射保持不变)
+q4_titles <- c(
+  "q4_ui_simple" = "界面应简洁明了",
+  "q4_integrate_platform" = "希望与常用平台打通",
+  "q4_auto_record" = "希望APP能自动记录数据",
+  "q4_clear_guidance" = "希望APP提供清晰的低碳引导"
+)
+
+# *** (修改) 调用 pie_plot_list ***
+pie_ls_q4 <- pie_plot_list(
+  "q4_ui_simple", 
+  "q4_clear_guidance", 
+  title_map = q4_titles,
+  n_to_keep = 5 # 确保 5 个选项都显示
+)
+Reduce(`+`, pie_ls_q4) + plot_layout(nrow = 2)
+
+# 和实用性有关的。
+# (标题映射保持不变)
+q4_2_titles <- c(
+  "q4_raise_awareness" = "APP能提高低碳意识",
+  "q4_info_feedback_useful" = "APP提供的信息和反馈很实用",
+  "q4_quicker_green_choice" = "APP能助我更快做环保选择"
+)
+
+# *** (修改) 调用 pie_plot_list ***
+pie_ls_q4_2 <- pie_plot_list(
+  "q4_raise_awareness", 
+  "q4_quicker_green_choice",
+  title_map = q4_2_titles,
+  n_to_keep = 5 # 确保 5 个选项都显示
+)
+Reduce(`+`, pie_ls_q4_2) + plot_layout(nrow = 1)
+
+# 一些其他方面的促进。
+# (标题映射保持不变)
+q20_titles <- c(
+  "q20_celeb_endorsement" = "明星代言会让我更关注",
+  "q20_video_intro" = "视频介绍更吸引我",
+  "q20_focus_env_vs_self" = "“环保意义”不如“个人利益”吸引我",
+  "q20_ranking_motivation" = "排行/成就会激励我",
+  "q20_image_inspire" = "图像/动画比文字更有趣",
+  "q20_cumulative_inspire" = "累计成效激励我维持行为"
+)
+
+# *** (修改) 调用 pie_plot_list ***
+pie_ls_q20 <- pie_plot_list(
+  "q20_celeb_endorsement", 
+  "q20_cumulative_inspire",
+  title_map = q20_titles,
+  n_to_keep = 7 # 确保 7 个选项都显示
+)
+# 6个图，设为3列
+Reduce(`+`, pie_ls_q20) + plot_layout(ncol = 2)
