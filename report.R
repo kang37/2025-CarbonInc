@@ -2255,3 +2255,335 @@ combined_distribution_plots <- wrap_plots(
   )
 print(combined_distribution_plots)
 
+# Elder使用体验 ----
+# --- (新增) 分析：各年龄组在“用户体验 (Q4)”上的差异 ---
+#
+# 我们将比较 "青年", "中年", "老年" 三组
+# 在 q4_ui_simple, q4_integrate_platform, q4_auto_record, q4_clear_guidance 
+# 这四个问题上的评分差异。
+#
+
+# 1. 定义您要分析的变量和标题 (来自您的代码)
+ux_vars_map <- c(
+  "q4_ui_simple" = "界面应简洁明了",
+  "q4_integrate_platform" = "希望与常用平台打通",
+  "q4_auto_record" = "希望APP能自动记录数据",
+  "q4_clear_guidance" = "希望APP提供清晰的低碳引导"
+)
+
+# 2. 准备数据
+# (假设您已在 Turn 35 的代码中将 Q4 变量重编码为 "非常不同意" 等因子)
+ux_data_long <- data %>%
+  # 选择所有四个 Q4 变量和年龄组
+  select(all_of(names(ux_vars_map)), age_group_3) %>%
+  # 转换为长格式，以便于分析
+  pivot_longer(
+    cols = -age_group_3,
+    names_to = "Variable",
+    values_to = "Response_Factor" # 这是 "非常不同意" 等因子
+  ) %>%
+  filter(!is.na(age_group_3) & !is.na(Response_Factor)) %>%
+  # 创建一个数值列 (1-5) 用于统计检验
+  mutate(
+    Score = as.numeric(Response_Factor),
+    # 使用 recode_factor 保持标签顺序
+    Variable_Label = recode_factor(Variable, !!!ux_vars_map)
+  )
+
+# 3. 执行统计检验 (Kruskal-Wallis 和 Dunn's Post-hoc)
+
+# (a) Kruskal-Wallis (总检验)
+kruskal_tests_ux <- ux_data_long %>%
+  group_by(Variable_Label) %>%
+  rstatix::kruskal_test(Score ~ age_group_3) %>%
+  rstatix::add_significance("p")
+
+# (b) Dunn's Test (事后两两对比)
+# (我们为所有检验都运行它，并在绘图时只显示显著的)
+post_hoc_tests_ux <- ux_data_long %>%
+  group_by(Variable_Label) %>%
+  rstatix::dunn_test(Score ~ age_group_3, p.adjust.method = "bonferroni") %>%
+  rstatix::add_xy_position(x = "age_group_3", scales = "free_y")
+
+# 4. 打印统计检验结果表格
+cat("\n\n--- (统计分析) 用户体验 (Q4) 的 Kruskal-Wallis 检验结果 ---\n")
+print(knitr::kable(kruskal_tests_ux))
+
+cat("\n\n--- (统计分析) 用户体验 (Q4) 的 Dunn's 事后检验 (两两对比) ---\n")
+# (我们只打印显著的对比)
+post_hoc_significant_ux <- post_hoc_tests_ux %>% 
+  filter(p.adj < 0.05) %>%
+  select(Variable_Label, group1, group2, p.adj, p.adj.signif)
+print(knitr::kable(post_hoc_significant_ux))
+
+
+
+# 6. 可视化 (b): 100% 堆叠条形图 (最适合显示分布)
+
+# (从您之前的代码中借用颜色)
+likert_color_palette <- c(
+  "1" = "#D32F2F",
+  "2" = "#F57C00",
+  "3" = "#FDD835",
+  "4" = "#66BB6A",
+  "5" = "#2E7D32"
+)
+
+# (准备计数数据)
+ux_dist_data <- ux_data_long %>%
+  count(age_group_3, Variable_Label, Response_Factor, name = "Count") %>%
+  group_by(age_group_3, Variable_Label) %>%
+  mutate(Proportion = Count / sum(Count))
+
+plot_ux_stacked_bar <- ggplot(ux_dist_data, 
+                              aes(x = age_group_3, y = Proportion, fill = as.character(Response_Factor))) +
+  geom_bar(stat = "identity", position = "fill") +
+  # 按四个问题分面
+  facet_wrap(~ Variable_Label, ncol = 2) +
+  labs(
+    title = "各年龄组对“用户体验”的看法分布",
+    subtitle = "100% 堆叠条形图",
+    x = "年龄组",
+    y = "各选项占比"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face="bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 20, hjust = 1),
+    legend.position = "bottom"
+  )
+
+print(plot_ux_stacked_bar)
+
+# Elder实用性----
+# --- (新增) 分析：各年龄组在“APP实用性 (Q4_2)”上的差异 ---
+#
+# 我们将比较 "青年", "中年", "老年" 三组
+# 在 q4_raise_awareness, q4_info_feedback_useful, q4_quicker_green_choice
+# 这三个问题上的评分差异。
+#
+
+# 1. 定义您要分析的变量和标题 (来自您的代码)
+practicality_vars_map <- c(
+  "q4_raise_awareness" = "APP能提高低碳意识",
+  "q4_info_feedback_useful" = "APP提供的信息和反馈很实用",
+  "q4_quicker_green_choice" = "APP能助我更快做环保选择"
+)
+
+# 2. 准备数据
+# (假设您已在 Turn 35 的代码中将 Q4 变量重编码为 "非常不同意" 等因子)
+practicality_data_long <- data %>%
+  # 选择所有三个 Q4_2 变量和年龄组
+  select(all_of(names(practicality_vars_map)), age_group_3) %>%
+  # 转换为长格式
+  pivot_longer(
+    cols = -age_group_3,
+    names_to = "Variable",
+    values_to = "Response_Factor" # 这是 "非常不同意" 等因子
+  ) %>%
+  filter(!is.na(age_group_3) & !is.na(Response_Factor)) %>%
+  # 创建一个数值列 (1-5) 用于统计检验
+  mutate(
+    Score = as.numeric(Response_Factor),
+    # 使用 recode_factor 保持标签顺序
+    Variable_Label = recode_factor(Variable, !!!practicality_vars_map)
+  )
+
+# 3. 执行统计检验 (Kruskal-Wallis 和 Dunn's Post-hoc)
+
+# (a) Kruskal-Wallis (总检验)
+# --- (已修改) 使用更健 trụ
+kruskal_tests_practicality <- practicality_data_long %>%
+  group_by(Variable_Label) %>%
+  tidyr::nest() %>%
+  mutate(
+    test_result = purrr::map(data, ~ tryCatch(
+      kruskal.test(Score ~ age_group_3, data = .x),
+      error = function(e) { NA }
+    )),
+    tidied = purrr::map(test_result, broom::tidy)
+  ) %>%
+  tidyr::unnest(tidied) %>%
+  select(Variable_Label, p.value, statistic) %>%
+  rename(p = p.value) %>%
+  rstatix::add_significance("p")
+
+
+# (b) Dunn's Test (事后两两对比)
+post_hoc_tests_practicality <- practicality_data_long %>%
+  group_by(Variable_Label) %>%
+  rstatix::dunn_test(Score ~ age_group_3, p.adjust.method = "bonferroni") %>%
+  rstatix::add_xy_position(x = "age_group_3", scales = "free_y")
+
+# 4. 打印统计检验结果表格
+cat("\n\n--- (统计分析) APP实用性 (Q4_2) 的 Kruskal-Wallis 检验结果 ---\n")
+print(knitr::kable(kruskal_tests_practicality))
+
+cat("\n\n--- (统计分析) APP实用性 (Q4_2) 的 Dunn's 事后检验 (两两对比) ---\n")
+# (我们只打印显著的对比)
+post_hoc_significant_practicality <- post_hoc_tests_practicality %>% 
+  filter(p.adj < 0.05) %>%
+  select(Variable_Label, group1, group2, p.adj, p.adj.signif)
+print(knitr::kable(post_hoc_significant_practicality, format = "html"))
+
+
+
+
+# 6. 可视化 (b): 100% 堆叠条形图 (最适合显示分布)
+
+# (假设 likert_color_palette 已在环境中定义)
+# (准备计数数据)
+practicality_dist_data <- practicality_data_long %>%
+  count(age_group_3, Variable_Label, Response_Factor, name = "Count") %>%
+  group_by(age_group_3, Variable_Label) %>%
+  mutate(Proportion = Count / sum(Count))
+
+plot_practicality_stacked_bar <- ggplot(practicality_dist_data, 
+                                        aes(x = age_group_3, y = Proportion, fill = Response_Factor)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # 按三个问题分面
+  facet_wrap(~ Variable_Label, ncol = 3) +
+  # scale_fill_manual(values = likert_color_palette, name = "评分") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "各年龄组对“APP实用性”的看法分布",
+    subtitle = "100% 堆叠条形图",
+    x = "年龄组",
+    y = "各选项占比"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face="bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 20, hjust = 1),
+    legend.position = "bottom"
+  )
+
+print(plot_practicality_stacked_bar)
+
+# Elder附加功能----
+# --- (新增) 分析：各年龄组在“其他促进因素 (Q20)”上的差异 ---
+#
+# 我们将比较 "青年", "中年", "老年" 三组
+# 在 q20_celeb_endorsement, q20_video_intro, ... q20_cumulative_inspire
+# 这六个问题上的评分差异。
+#
+
+# 1. 定义您要分析的变量和标题 (来自您的代码)
+promo_vars_map <- c(
+  "q20_celeb_endorsement" = "明星代言会让我更关注",
+  "q20_video_intro" = "视频介绍更吸引我",
+  "q20_focus_env_vs_self" = "“环保意义”不如“个人利益”吸引我",
+  "q20_ranking_motivation" = "排行/成就会激励我",
+  "q20_image_inspire" = "图像/动画比文字更有趣",
+  "q20_cumulative_inspire" = "累计成效激励我维持行为"
+)
+
+# 2. 准备数据
+# (假设您已在 Turn 35 的代码中将 Q20 变量重编码为 "非常不同意"..."非常同意" 因子)
+promo_data_long <- data %>%
+  # 选择所有六个 Q20 变量和年龄组
+  select(all_of(names(promo_vars_map)), age_group_3) %>%
+  # 转换为长格式
+  pivot_longer(
+    cols = -age_group_3,
+    names_to = "Variable",
+    values_to = "Response_Factor" # 这是 7 点量表因子
+  ) %>%
+  filter(!is.na(age_group_3) & !is.na(Response_Factor)) %>%
+  # 创建一个数值列 (1-7) 用于统计检验
+  mutate(
+    Score = as.numeric(Response_Factor),
+    # 使用 recode_factor 保持标签顺序
+    Variable_Label = recode_factor(Variable, !!!promo_vars_map)
+  )
+
+# 3. 执行统计检验 (Kruskal-Wallis 和 Dunn's Post-hoc)
+
+# (a) Kruskal-Wallis (总检验) - 健壮版本
+kruskal_tests_promo <- promo_data_long %>%
+  group_by(Variable_Label) %>%
+  tidyr::nest() %>%
+  mutate(
+    test_result = purrr::map(data, ~ tryCatch(
+      kruskal.test(Score ~ age_group_3, data = .x),
+      error = function(e) { NA }
+    )),
+    tidied = purrr::map(test_result, broom::tidy)
+  ) %>%
+  tidyr::unnest(tidied) %>%
+  select(Variable_Label, p.value, statistic) %>%
+  rename(p = p.value) %>%
+  rstatix::add_significance("p")
+
+
+# (b) Dunn's Test (事后两两对比)
+post_hoc_tests_promo <- promo_data_long %>%
+  group_by(Variable_Label) %>%
+  rstatix::dunn_test(Score ~ age_group_3, p.adjust.method = "bonferroni") %>%
+  rstatix::add_xy_position(x = "age_group_3", scales = "free_y")
+
+# 4. 打印统计检验结果表格
+cat("\n\n--- (统计分析) 其他促进因素 (Q20) 的 Kruskal-Wallis 检验结果 ---\n")
+print(knitr::kable(kruskal_tests_promo))
+
+cat("\n\n--- (统计分析) 其他促进因素 (Q20) 的 Dunn's 事后检验 (两两对比) ---\n")
+# (我们只打印显著的对比)
+post_hoc_significant_promo <- post_hoc_tests_promo %>% 
+  filter(p.adj < 0.05) %>%
+  select(Variable_Label, group1, group2, p.adj, p.adj.signif)
+print(knitr::kable(post_hoc_significant_promo))
+
+
+
+# 6. 可视化 (b): 100% 堆叠条形图 (最适合显示分布)
+
+# (新增) 定义 7 点量表标签和颜色
+# (基于 Turn 35 定义的 likert_7_labels)
+likert_7_labels_map <- c(
+  "1" = "非常不同意",
+  "2" = "不同意",
+  "3" = "中立",
+  "4" = "同意",
+  "5" = "非常同意"
+)
+
+likert_7_color_palette <- c(
+  "非常不同意" = "#D32F2F",
+  "不同意" = "#FB8C00", # 橙色-黄
+  "中立" = "#FDD835",
+  "同意" = "#9CCC65", # 绿-黄
+  "非常同意" = "#2E7D32"
+)
+
+# (准备计数数据)
+promo_dist_data <- promo_data_long %>%
+  # (修改) 确保 Response_Factor 匹配 7 点量表
+  mutate(Response_Factor = recode_factor(Score, !!!likert_7_labels_map)) %>%
+  count(age_group_3, Variable_Label, Response_Factor, name = "Count") %>%
+  group_by(age_group_3, Variable_Label) %>%
+  mutate(Proportion = Count / sum(Count))
+
+plot_promo_stacked_bar <- ggplot(promo_dist_data, 
+                                 aes(x = age_group_3, y = Proportion, fill = Response_Factor)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # 按六个问题分面 (2 列)
+  facet_wrap(~ Variable_Label, ncol = 2) +
+  scale_fill_manual(values = likert_7_color_palette, name = "评分") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "各年龄组对“其他促进因素”的看法分布",
+    subtitle = "100% 堆叠条形图",
+    x = "年龄组",
+    y = "各选项占比"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face="bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 20, hjust = 1),
+    legend.position = "bottom"
+  )
+
+print(plot_promo_stacked_bar)
