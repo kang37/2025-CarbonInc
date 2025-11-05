@@ -306,18 +306,14 @@ plot_bar_chart <- function(data, col_x, title = "分类计数分布", x_lab = "�
       stat = "identity", 
       fill = "steelblue"
     ) +
-    
     # ***关键修改：使用 x_lab 参数***
-    labs(
-      title = title,
-      x = x_lab, # 使用传入的 x_lab
-      y = "计数"
-    ) +
+    labs(title = title, x = x_lab, y = "计数") +
     lims(y = c(0, 600)) + 
     theme_bw() +
     theme(
       axis.text.x = element_text(angle = 90, hjust = 1),
-      plot.title = element_text(hjust = 0.5, face = "bold")
+      plot.title = element_text(hjust = 0.5, face = "bold"), 
+      title = element_text(size = 7)
     )
   
   return(plot)
@@ -2119,16 +2115,11 @@ analyze_behavior_by_3_age_groups <- function(
     facet_wrap(~ age_group_3) +
     scale_fill_manual(values = likert_color_palette, name = "评分") +
     scale_y_continuous(labels = scales::percent) +
-    labs(
-      title = paste(behavior_label, "- 组内行为分布变化"),
-      subtitle = "100% 堆叠条形图 (使用前 vs 使用后)",
-      x = NULL, y = "各选项占比"
-    ) +
+    labs(title = behavior_label, x = NULL, y = "各选项占比") +
     theme_minimal() +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold"),
-      plot.subtitle = element_text(hjust = 0.5),
-      legend.position = "bottom"
+      plot.subtitle = element_text(hjust = 0.5)
     )
   
   # --- 返回所有结果 ---
@@ -2231,8 +2222,6 @@ between_results_summary <- lapply(full_age_analysis_results, function(res) {
 
 
 # --- (可视化) ---
-# (此部分与您的代码相同，无需修改)
-
 cat("\n\n--- (可视化) 各年龄组行为“变化幅度”对比 ---\n")
 combined_between_plots <- wrap_plots(
   lapply(full_age_analysis_results, `[[`, "plot_between"), 
@@ -2588,3 +2577,11 @@ plot_promo_stacked_bar <- ggplot(promo_dist_data,
   )
 
 print(plot_promo_stacked_bar)
+
+# Export ----
+three_group_table %>% 
+  select(行为, 使用前均值, 使用后均值, 非用户均值, Kruskal_p值) %>% 
+  write.csv("data_proc/three_group_table.csv")
+within_results_wide_table %>% 
+  write.csv("data_proc/within_results_wide_table.csv")
+
