@@ -585,7 +585,8 @@ q13_summary_plot <- ggplot(q13_summary, aes(x = reorder(Option, Count), y = Coun
     plot.title = element_text(hjust = 0.5, face = "bold"),
     plot.subtitle = element_text(hjust = 0.5),
     legend.position = "none"
-  )
+  ) + 
+  lims(y = c(0, 800))
 
 print(q13_summary_plot)
 
