@@ -113,8 +113,6 @@ data <-
   rename(!!!question_map) %>% 
   mutate(across(all_of(variables), factor)) %>% 
   mutate(
-    # --- 请根据您的数据字典（问卷选项）修改 "1" = "???" 的映射 ---
-    
     # 1. 性别 (假设 1=男, 2=女)
     gender = recode_factor(gender,
                            "1" = "男",
