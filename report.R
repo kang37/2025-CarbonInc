@@ -2851,6 +2851,285 @@ combined_income_dist_plots <- wrap_plots(
 
 print(combined_income_dist_plots)
 
+# Education行为变化 ----
+# --- (新增) 按四个教育水平组进行行为变化对比分析 ---
+#
+# 变量: education
+# --- 步骤 1: 创建新的教育分组 'edu_group_4' ---
+data <- data %>%
+  mutate(
+    # 确保 education 是字符型以便匹配
+    edu_char = as.character(education),
+    
+    # 使用 case_when 创建新分组
+    edu_group_4 = case_when(
+      edu_char %in% c("1", "2") ~ "高中及以下 (1-2档)",
+      edu_char == "3"           ~ "大专 (3档)",
+      edu_char == "4"           ~ "本科 (4档)",
+      edu_char == "5"           ~ "研究生及以上 (5档)",
+      TRUE                      ~ NA_character_ # 其他情况设为NA
+    )
+  ) %>%
+  # 将其转换为有序因子，确保绘图顺序正确
+  mutate(
+    edu_group_4 = factor(
+      edu_group_4, 
+      levels = c("高中及以下 (1-2档)", "大专 (3档)", "本科 (4档)", "研究生及以上 (5档)")
+    )
+  )
+
+# --- (辅助函数) 执行完整分析流程 (针对教育组) ---
+analyze_behavior_by_4_edu_groups <- function(
+    data, 
+    pre_col_str, 
+    post_col_str, 
+    behavior_label
+) {
+  
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+  
+  # --- 数据准备 ---
+  analysis_data <- data %>%
+    # 仅限 APP 用户
+    filter(q1_used_app == 1) %>% 
+    select(!!pre_sym, !!post_sym, edu_group_4) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre # 计算变化幅度
+    ) %>%
+    # 移除没有完成前后问卷或没有教育分组的样本
+    filter(!is.na(Pre) & !is.na(Post) & !is.na(edu_group_4))
+  
+  # --- 步骤 2: 组内分析 (配对 Wilcoxon 检验) ---
+  within_group_tests <- analysis_data %>%
+    group_by(edu_group_4) %>%
+    summarise(
+      N = n(),
+      Mean_Pre = round(mean(Pre, na.rm = TRUE), 2),
+      Mean_Post = round(mean(Post, na.rm = TRUE), 2),
+      Mean_Difference = round(mean(Difference, na.rm = TRUE), 3),
+      # 计算配对检验P值 (exact=FALSE 避免 ties 警告)
+      p = wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$p.value,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      p_signif = case_when(
+        p < 0.001 ~ "***",
+        p < 0.01  ~ "**",
+        p < 0.05  ~ "*",
+        TRUE ~ "ns"
+      )
+    )
+  
+  # --- 步骤 3: 组间分析 (Kruskal-Wallis + 事后检验) ---
+  # (a) Kruskal-Wallis 检验
+  between_group_kruskal <- kruskal.test(Difference ~ edu_group_4, data = analysis_data)
+  
+  # (b) 事后检验 (Dunn's test)
+  post_hoc_tests <- NULL
+  if (between_group_kruskal$p.value < 0.05) {
+    post_hoc_tests <- analysis_data %>%
+      rstatix::dunn_test(Difference ~ edu_group_4, p.adjust.method = "bonferroni") %>%
+      rstatix::add_xy_position(x = "edu_group_4")
+  }
+  
+  # --- 可视化 ---
+  # (a) 组内 Pre vs Post 均值对比图
+  plot_within <- analysis_data %>%
+    pivot_longer(cols = c(Pre, Post), names_to = "Period", values_to = "Score") %>%
+    group_by(edu_group_4, Period) %>%
+    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后"))) %>%
+    ggplot(aes(x = Period, y = Mean_Score, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5) +
+    facet_wrap(~ edu_group_4, nrow = 1) + # 按教育组分面
+    labs(
+      title = paste(behavior_label, "- 组内行为变化"),
+      y = "行为平均分"
+    ) +
+    theme_minimal() + theme(legend.position = "none")
+  
+  # (b) 组间“变化幅度”对比图 (箱线图)
+  plot_between <- ggplot(analysis_data, aes(x = edu_group_4, y = Difference, fill = edu_group_4)) +
+    geom_boxplot() +
+    labs(
+      title = paste(behavior_label, "- 组间变化幅度对比"),
+      subtitle = paste0("Kruskal-Wallis P 值: ", 
+                        format.pval(between_group_kruskal$p.value, digits = 3)),
+      x = "教育水平",
+      y = "行为变化量 (使用后 - 使用前)"
+    ) +
+    theme_minimal() + theme(legend.position = "none", axis.text.x = element_text(angle = 15, hjust = 1))
+  
+  # 添加显著性标记 (手动绘制)
+  if (!is.null(post_hoc_tests)) {
+    sig_data <- post_hoc_tests %>% filter(p.adj < 0.05)
+    if (nrow(sig_data) > 0) {
+      plot_between <- plot_between + 
+        geom_segment(data = sig_data, aes(x = xmin, xend = xmax, y = y.position, yend = y.position), inherit.aes = FALSE) +
+        geom_text(data = sig_data, aes(x = (xmin + xmax)/2, y = y.position, label = p.adj.signif), vjust = -0.5, inherit.aes = FALSE)
+    }
+  }
+  
+  # (c) 组内分布变化图 (100% 堆叠条形图)
+  likert_5_labels_map <- c(
+    "1" = "1 (非常不同意)", "2" = "2 (不同意)", "3" = "3 (中立)",
+    "4" = "4 (同意)", "5" = "5 (非常同意)"
+  )
+  likert_color_palette <- c(
+    "1 (非常不同意)" = "#D32F2F", "2 (不同意)" = "#F57C00", "3 (中立)" = "#FDD835",
+    "4 (同意)" = "#66BB6A", "5 (非常同意)" = "#2E7D32", "NA" = "grey"
+  )
+  likert_levels <- c("1 (非常不同意)", "2 (不同意)", "3 (中立)", "4 (同意)", "5 (非常同意)")
+  
+  plot_dist_data <- analysis_data %>%
+    select(Pre, Post, edu_group_4) %>%
+    pivot_longer(cols = c(Pre, Post), names_to = "Period", values_to = "Response") %>%
+    mutate(Response = as.character(Response)) %>%
+    count(edu_group_4, Period, Response, name = "Count") %>%
+    group_by(edu_group_4, Period) %>%
+    mutate(
+      Proportion = Count / sum(Count),
+      Response_Label = recode_factor(Response, !!!likert_5_labels_map, .default = "NA")
+    ) %>%
+    ungroup() %>%
+    mutate(Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后")))
+  
+  plot_distribution <- ggplot(plot_dist_data, aes(x = Period, y = Proportion, fill = Response_Label)) +
+    geom_bar(stat = "identity", position = "fill") +
+    geom_text(
+      aes(label = ifelse(Proportion > 0.05, scales::percent(Proportion, accuracy = 1), "")),
+      position = position_stack(vjust = 0.5), color = "black", size = 2.5
+    ) +
+    facet_wrap(~ edu_group_4, nrow = 1) +
+    scale_fill_manual(
+      values = likert_color_palette, 
+      name = "评分",
+      breaks = likert_levels, 
+      drop = FALSE
+    ) +
+    scale_y_continuous(labels = scales::percent) +
+    labs(title = behavior_label, x = NULL, y = "各选项占比") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "right"
+    )
+  
+  return(list(
+    label = behavior_label,
+    within_tests = within_group_tests,
+    between_kruskal = between_group_kruskal,
+    post_hoc = post_hoc_tests,
+    plot_within = plot_within,
+    plot_between = plot_between,
+    plot_distribution = plot_distribution
+  ))
+}
+
+# --- 批量执行所有行为的分析 ---
+full_edu_analysis_results <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_by_4_edu_groups(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# --- 结果汇总与展示 ---
+
+# 1. (组内分析) 表1：长表格
+edu_within_results_long <- do.call(rbind, lapply(full_edu_analysis_results, function(res) {
+  res$within_tests$behavior <- res$label
+  res$within_tests
+})) %>%
+  select(behavior, edu_group_4, N, Mean_Pre, Mean_Post, Mean_Difference, p, p_signif) %>%
+  rename(
+    行为 = behavior, 
+    教育组 = edu_group_4, 
+    样本量 = N,
+    使用前均值 = Mean_Pre,
+    使用后均值 = Mean_Post,
+    均值差异 = Mean_Difference,
+    组内P值 = p, 
+    显著性 = p_signif
+  )
+
+cat("\n\n--- (教育组内分析) 表1：长表格 ---\n")
+print(knitr::kable(edu_within_results_long, format = "html"))
+
+
+# 2. (组内分析) 表2：宽表格 (均值差异 + P值)
+edu_within_results_wide <- edu_within_results_long %>%
+  rename(group_p = 组内P值) %>% 
+  dplyr::mutate(
+    P_Label = case_when(
+      显著性 == "ns" ~ "ns",
+      `group_p` < 0.001 ~ "p < .001",
+      `group_p` < 0.01  ~ "p < .01",
+      `group_p` < 0.05  ~ "p < .05"
+    ),
+    Cell_Text = paste0(format(均值差异, digits = 2), " (", P_Label, ")")
+  ) %>%
+  select(行为, 教育组, Cell_Text) %>%
+  pivot_wider(
+    names_from = 教育组,
+    values_from = Cell_Text
+  )
+
+cat("\n\n--- (教育组内分析) 表2：宽表格 ---\n")
+print(knitr::kable(edu_within_results_wide, format = "html"))
+
+
+# 3. (组间分析) 统计结果
+cat("\n\n--- (组间分析) 汇总 ---\n")
+lapply(full_edu_analysis_results, function(res) {
+  cat("\n\n--- (组间分析) 行为:", res$label, "---\n")
+  cat("Kruskal-Wallis 检验 P 值:", format.pval(res$between_kruskal$p.value, digits = 3), "\n")
+  if (!is.null(res$post_hoc) && nrow(res$post_hoc) > 0) {
+    cat("事后两两对比 (Bonferroni 校正):\n")
+    print(knitr::kable(res$post_hoc %>% select(group1, group2, p.adj, p.adj.signif), format = "html"))
+  } else {
+    cat("组间无显著差异。\n")
+  }
+})
+
+# 4. 可视化：组间变化幅度对比
+cat("\n\n--- (可视化) 各教育组行为“变化幅度”对比 ---\n")
+combined_edu_between_plots <- wrap_plots(
+  lapply(full_edu_analysis_results, `[[`, "plot_between"), 
+  ncol = 2
+) +
+  plot_annotation(
+    title = "各教育组行为“变化幅度”对比",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+print(combined_edu_between_plots)
+
+# 5. 可视化：组内分布变化对比
+cat("\n\n--- (可视化) 各教育组行为“分布变化”对比 ---\n")
+combined_edu_dist_plots <- wrap_plots(
+  lapply(full_edu_analysis_results, `[[`, "plot_distribution"), 
+  ncol = 1 # 因为有4列分面，建议每行只放1个图，或者ncol=1
+) + 
+  # 收集图例
+  plot_layout(guides = "collect") +
+  
+  # 设置标题，并将图例位置放在右侧
+  plot_annotation(
+    title = "各教育组行为“分布变化”对比 (使用前 vs 使用后)",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  ) & 
+  theme(legend.position = "right")
+
+print(combined_edu_dist_plots)
+
 # Export ----
 three_group_table %>% 
   select(行为, 使用前均值, 使用后均值, 非用户均值, Kruskal_p值) %>% 
