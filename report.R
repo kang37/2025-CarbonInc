@@ -2098,8 +2098,9 @@ analyze_behavior_by_3_age_groups <- function(
   
   # (c.3) 定义颜色方案
   likert_color_palette <- c(
-    "1 (非常不同意)" = "#D32F2F", "2 (不同意)" = "#F57C00", "3 (中立)" = "#FDD835",
-    "4S (同意)" = "#66BB6A", "5 (非常同意)" = "#2E7D32", "NA" = "grey"
+    "1 (非常不同意)" = "#D32F2F", "2 (不同意)" = "#F57C00", 
+    "3 (中立)" = "#FDD835",
+    "4 (同意)" = "lightgreen", "5 (非常同意)" = "#2E7D32", "NA" = "grey"
   )
   
   # (c.4) 绘制 100% 堆叠条形图
@@ -2149,10 +2150,6 @@ full_age_analysis_results <- lapply(names(behavior_map), function(b) {
 
 # 1. 汇总“组内检验”结果到一张漂亮的表格
 # (此部分与您的代码相同，无需修改)
-# --- (替换) 结果汇总与展示 (生成2个新表格) ---
-
-# --- (组内分析) ---
-
 # 1. (修改) 汇总“组内检验”结果 (现在包含所有均值)
 within_results_long_table <- do.call(rbind, lapply(full_age_analysis_results, function(res) {
   # 增加一列行为标签
@@ -2227,7 +2224,7 @@ combined_between_plots <- wrap_plots(
 ) +
   plot_annotation(
     title = "各年龄组行为“变化幅度”对比",
-    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold"))
   )
 print(combined_between_plots)
 
@@ -2238,8 +2235,8 @@ combined_distribution_plots <- wrap_plots(
   ncol = 2 # 6 个图表，2 列
 ) +
   plot_annotation(
-    title = "各年龄组行为“分布变化”对比 (使用前 vs 使用后)",
-    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+    title = "各年龄组行为分布变化对比 (使用前 vs 使用后)",
+    theme = theme(plot.title = element_text(hjust = 0.5))
   )
 print(combined_distribution_plots)
 
