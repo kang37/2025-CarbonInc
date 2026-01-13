@@ -3128,9 +3128,623 @@ combined_edu_dist_plots <- wrap_plots(
 print(combined_edu_dist_plots)
 
 # Export ----
-three_group_table %>% 
-  select(行为, 使用前均值, 使用后均值, 非用户均值, Kruskal_p值) %>% 
+three_group_table %>%
+  select(行为, 使用前均值, 使用后均值, 非用户均值, Kruskal_p值) %>%
   write.csv("data_proc/three_group_table.csv")
-within_results_wide_table %>% 
+within_results_wide_table %>%
   write.csv("data_proc/within_results_wide_table.csv")
+
+# ============================================
+# 信息渠道分析 ----
+# ============================================
+
+# --- 步骤1: 查看原始信息渠道填写内容 ---
+cat("\n\n=== 信息渠道原始频率分布 ===\n")
+info_sources_all <- c(
+  data$q5_info_source_1,
+  data$q5_info_source_2,
+  data$q5_info_source_3
+) %>%
+  na.omit()
+
+info_freq <- table(info_sources_all) %>%
+  sort(decreasing = TRUE)
+
+cat("前20个高频信息渠道:\n")
+print(head(info_freq, 20))
+
+# --- 步骤2: 信息渠道分类编码函数 ---
+categorize_info_source <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  dplyr::case_when(
+    grepl("微信|朋友圈|公众号", x) ~ "微信",
+    grepl("支付宝", x) ~ "支付宝",
+    grepl("抖音|短视频|快手|视频|b站|bilibili", x) ~ "短视频平台",
+    grepl("微博|小红书", x) ~ "社交媒体",
+    grepl("电视|新闻|报纸|媒体|广播", x) ~ "传统媒体",
+    grepl("政府|官方|社区|居委|街道|单位|公司", x) ~ "政府/单位/社区",
+    grepl("朋友|家人|同事|亲戚|同学", x) ~ "亲友推荐",
+    grepl("网络|网上|百度|搜索|浏览器", x) ~ "网络搜索",
+    grepl("学校|老师|课程|教育", x) ~ "学校教育",
+    grepl("app|应用|软件", x) ~ "APP内推荐",
+    is.na(x) | x == "" | x == "na" ~ NA_character_,
+    TRUE ~ "其他"
+  )
+}
+
+# --- 步骤3: 应用分类编码 ---
+data <- data %>%
+  mutate(
+    info_source_cat_1 = categorize_info_source(q5_info_source_1),
+    info_source_cat_2 = categorize_info_source(q5_info_source_2),
+    info_source_cat_3 = categorize_info_source(q5_info_source_3),
+    # 创建主要信息渠道 (第一选择)
+    info_source_main = factor(info_source_cat_1)
+  )
+
+# 验证分类结果
+cat("\n信息渠道分类后频率:\n")
+print(table(data$info_source_main, useNA = "ifany"))
+
+# ============================================
+# 卡方检验：不同群体的偏好差异 ----
+# ============================================
+
+# --- 辅助函数：卡方检验并返回结果 ---
+chi_sq_analysis <- function(data, group_var, response_var, title) {
+
+  # 过滤有效数据
+  valid_data <- data %>%
+    filter(!is.na(.data[[group_var]]) & !is.na(.data[[response_var]]))
+
+  if (nrow(valid_data) < 10) {
+    cat("警告:", title, "- 有效样本量不足\n")
+    return(NULL)
+  }
+
+  # 创建列联表
+  contingency <- table(valid_data[[group_var]], valid_data[[response_var]])
+
+  # 卡方检验
+  chi_result <- tryCatch(
+    chisq.test(contingency),
+    error = function(e) NULL
+  )
+
+  if (is.null(chi_result)) {
+    cat("警告:", title, "- 卡方检验失败\n")
+    return(NULL)
+  }
+
+  # 计算 Cramér's V 效应量
+  n <- sum(contingency)
+  k <- min(nrow(contingency), ncol(contingency))
+  cramers_v <- sqrt(chi_result$statistic / (n * (k - 1)))
+
+  # 效应量解读
+  effect_label <- ifelse(cramers_v < 0.1, "忽略不计",
+                         ifelse(cramers_v < 0.3, "小",
+                                ifelse(cramers_v < 0.5, "中", "大")))
+
+  list(
+    title = title,
+    contingency = contingency,
+    chi_result = chi_result,
+    cramers_v = as.numeric(cramers_v),
+    effect_label = effect_label,
+    std_residuals = chi_result$stdres
+  )
+}
+
+# --- 分析1: 不同年龄组的信息渠道偏好 ---
+cat("\n\n=== 卡方检验：年龄组 × 信息渠道 ===\n")
+age_info_chi <- chi_sq_analysis(
+  data = data,
+  group_var = "age_group_3",
+  response_var = "info_source_main",
+  title = "年龄组 × 信息渠道"
+)
+
+if (!is.null(age_info_chi)) {
+  cat("列联表:\n")
+  print(age_info_chi$contingency)
+  cat("\n卡方值:", round(age_info_chi$chi_result$statistic, 2))
+  cat("\n自由度:", age_info_chi$chi_result$parameter)
+  cat("\nP值:", format.pval(age_info_chi$chi_result$p.value, digits = 3))
+  cat("\nCramér's V:", round(age_info_chi$cramers_v, 3), "(", age_info_chi$effect_label, ")\n")
+  cat("\n标准化残差 (|值| > 2 表示显著偏离):\n")
+  print(round(age_info_chi$std_residuals, 2))
+}
+
+# --- 辅助函数：多选题按群体分析 ---
+analyze_multiselect_by_group <- function(data, group_var, col_names, col_labels, title) {
+
+  results <- lapply(seq_along(col_names), function(i) {
+    col <- col_names[i]
+    label <- col_labels[i]
+
+    temp_data <- data %>%
+      filter(!is.na(.data[[group_var]]) & !is.na(.data[[col]])) %>%
+      mutate(response = factor(as.numeric(.data[[col]]), levels = c(0, 1)))
+
+    if (nrow(temp_data) < 10) return(NULL)
+
+    contingency <- table(temp_data[[group_var]], temp_data$response)
+
+    chi_result <- tryCatch(
+      chisq.test(contingency),
+      error = function(e) NULL
+    )
+
+    if (is.null(chi_result)) return(NULL)
+
+    # 计算各组选择比例
+    prop_by_group <- temp_data %>%
+      group_by(.data[[group_var]]) %>%
+      summarise(
+        n = n(),
+        选中数 = sum(as.numeric(response) - 1),
+        选中比例 = round(mean(as.numeric(response) - 1) * 100, 1),
+        .groups = "drop"
+      )
+
+    data.frame(
+      选项 = label,
+      卡方值 = round(chi_result$statistic, 2),
+      自由度 = chi_result$parameter,
+      P值 = format.pval(chi_result$p.value, digits = 3),
+      显著性 = ifelse(chi_result$p.value < 0.001, "***",
+                   ifelse(chi_result$p.value < 0.01, "**",
+                          ifelse(chi_result$p.value < 0.05, "*", "ns")))
+    )
+  })
+
+  result_df <- do.call(rbind, Filter(Negate(is.null), results))
+
+  cat("\n\n===", title, "===\n")
+  if (!is.null(result_df) && nrow(result_df) > 0) {
+    print(knitr::kable(result_df, row.names = FALSE))
+  } else {
+    cat("无有效结果\n")
+  }
+
+  return(result_df)
+}
+
+# --- 分析2: 不同群体的障碍感知差异 ---
+q15_cols <- c("q15_barrier_trouble", "q15_barrier_privacy",
+              "q15_barrier_low_reward", "q15_barrier_unknown")
+q15_labels <- c("觉得操作麻烦", "担心隐私安全", "积分奖励太少", "没听说过")
+
+# 年龄组 × 障碍
+barrier_by_age <- analyze_multiselect_by_group(
+  data, "age_group_3", q15_cols, q15_labels,
+  "卡方检验：年龄组 × 使用障碍"
+)
+
+# 教育组 × 障碍
+barrier_by_edu <- analyze_multiselect_by_group(
+  data, "edu_group_4", q15_cols, q15_labels,
+  "卡方检验：教育组 × 使用障碍"
+)
+
+# --- 分析3: 不同群体的激励偏好差异 ---
+q12_cols <- c("q12_incentive_points", "q12_incentive_viz", "q12_incentive_ui",
+              "q12_incentive_social", "q12_incentive_game",
+              "q12_incentive_expert_advice", "q12_incentive_data_life")
+q12_labels <- c("积分兑奖", "图示减排成果", "简洁易操作界面",
+                "社交互动", "有趣任务游戏", "专家建议", "生活数据记录")
+
+# 年龄组 × 激励偏好
+incentive_by_age <- analyze_multiselect_by_group(
+  data, "age_group_3", q12_cols, q12_labels,
+  "卡方检验：年龄组 × 激励偏好"
+)
+
+# 教育组 × 激励偏好
+incentive_by_edu <- analyze_multiselect_by_group(
+  data, "edu_group_4", q12_cols, q12_labels,
+  "卡方检验：教育组 × 激励偏好"
+)
+
+# ============================================
+# 多重对应分析 (MCA) ----
+# ============================================
+library(FactoMineR)
+library(factoextra)
+
+cat("\n\n=== 多重对应分析 (MCA) ===\n")
+
+# --- 准备MCA数据 ---
+mca_data <- data %>%
+  filter(q1_used_app == 1) %>%  # 仅分析APP用户
+  select(
+    # 人口特征
+    age_group_3,
+    edu_group_4,
+    gender,
+    # 障碍感知
+    q15_barrier_trouble,
+    q15_barrier_privacy,
+    q15_barrier_low_reward,
+    q15_barrier_unknown,
+    # 激励偏好
+    q12_incentive_points,
+    q12_incentive_viz,
+    q12_incentive_ui,
+    q12_incentive_social
+  ) %>%
+  mutate(across(everything(), function(x) factor(as.character(x)))) %>%
+  na.omit()
+
+cat("MCA分析样本量:", nrow(mca_data), "\n")
+
+if (nrow(mca_data) >= 30) {
+  # 执行MCA
+  mca_result <- MCA(mca_data, graph = FALSE)
+
+  # 查看结果摘要
+  cat("\nMCA 结果摘要:\n")
+  print(summary(mca_result, nbelements = 5))
+
+  # 可视化1: 变量贡献图
+  p_mca_var <- fviz_mca_var(
+    mca_result,
+    choice = "var.cat",
+    repel = TRUE,
+    col.var = "contrib",
+    gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+    title = "MCA: 变量类别分布"
+  )
+  print(p_mca_var)
+
+  # 可视化2: 个体分布（按年龄组着色）
+  p_mca_ind <- fviz_mca_ind(
+    mca_result,
+    label = "none",
+    habillage = mca_data$age_group_3,
+    palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+    addEllipses = TRUE,
+    ellipse.level = 0.95,
+    title = "MCA: 不同年龄组的分布"
+  )
+  print(p_mca_ind)
+
+  # 可视化3: 双标图
+  p_mca_biplot <- fviz_mca_biplot(
+    mca_result,
+    repel = TRUE,
+    habillage = mca_data$age_group_3,
+    addEllipses = TRUE,
+    title = "MCA双标图: 人口特征与偏好关联"
+  )
+  print(p_mca_biplot)
+
+  # 维度描述
+  cat("\n各维度的变量贡献:\n")
+  dim_desc <- dimdesc(mca_result, axes = c(1, 2))
+  print(dim_desc)
+
+} else {
+  cat("警告: 样本量不足，无法执行MCA分析\n")
+}
+
+# ============================================
+# 性别组行为变化分析 ----
+# ============================================
+
+cat("\n\n=== 性别组行为变化分析 ===\n")
+
+# --- 辅助函数：按性别分析行为变化 ---
+analyze_behavior_by_gender <- function(
+    data,
+    pre_col_str,
+    post_col_str,
+    behavior_label
+) {
+
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+
+  # 数据准备
+  analysis_data <- data %>%
+    filter(q1_used_app == 1) %>%
+    select(!!pre_sym, !!post_sym, gender) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post) & !is.na(gender))
+
+  # 组内分析 (配对 Wilcoxon 检验)
+  within_group_tests <- analysis_data %>%
+    group_by(gender) %>%
+    summarise(
+      N = n(),
+      Mean_Pre = round(mean(Pre, na.rm = TRUE), 2),
+      Mean_Post = round(mean(Post, na.rm = TRUE), 2),
+      Mean_Difference = round(mean(Difference, na.rm = TRUE), 3),
+      p = wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$p.value,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      p_signif = case_when(
+        p < 0.001 ~ "***",
+        p < 0.01  ~ "**",
+        p < 0.05  ~ "*",
+        TRUE ~ "ns"
+      )
+    )
+
+  # 组间分析 (Mann-Whitney U 检验)
+  between_test <- wilcox.test(
+    Difference ~ gender,
+    data = analysis_data,
+    exact = FALSE
+  )
+
+  # 可视化
+  plot_data <- analysis_data %>%
+    pivot_longer(cols = c(Pre, Post), names_to = "Period", values_to = "Score") %>%
+    group_by(gender, Period) %>%
+    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后")))
+
+  p <- ggplot(plot_data, aes(x = Period, y = Mean_Score, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 3) +
+    facet_wrap(~ gender, nrow = 1) +
+    labs(
+      title = behavior_label,
+      subtitle = paste0("组间差异 P值: ", format.pval(between_test$p.value, digits = 3)),
+      y = "行为平均分"
+    ) +
+    lims(y = c(0, 6)) +
+    theme_minimal() +
+    theme(legend.position = "none", plot.title = element_text(hjust = 0.5, face = "bold"))
+
+  return(list(
+    label = behavior_label,
+    within_tests = within_group_tests,
+    between_test = between_test,
+    plot = p
+  ))
+}
+
+# 批量执行性别组分析
+gender_analysis_results <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_by_gender(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# 汇总表格
+gender_within_results <- do.call(rbind, lapply(gender_analysis_results, function(res) {
+  res$within_tests$behavior <- res$label
+  res$within_tests
+})) %>%
+  select(behavior, gender, N, Mean_Pre, Mean_Post, Mean_Difference, p, p_signif) %>%
+  rename(
+    行为 = behavior,
+    性别 = gender,
+    样本量 = N,
+    使用前均值 = Mean_Pre,
+    使用后均值 = Mean_Post,
+    均值差异 = Mean_Difference,
+    组内P值 = p,
+    显著性 = p_signif
+  )
+
+cat("\n--- 性别组内行为变化分析 ---\n")
+print(knitr::kable(gender_within_results, format = "html"))
+
+# 组间对比汇总
+gender_between_summary <- data.frame(
+  行为 = sapply(gender_analysis_results, `[[`, "label"),
+  组间P值 = sapply(gender_analysis_results, function(x)
+    format.pval(x$between_test$p.value, digits = 3)),
+  显著性 = sapply(gender_analysis_results, function(x) {
+    p <- x$between_test$p.value
+    ifelse(p < 0.001, "***", ifelse(p < 0.01, "**", ifelse(p < 0.05, "*", "ns")))
+  })
+)
+
+cat("\n--- 性别组间变化幅度差异 ---\n")
+print(knitr::kable(gender_between_summary, format = "html"))
+
+# 可视化
+combined_gender_plots <- wrap_plots(
+  lapply(gender_analysis_results, `[[`, "plot"),
+  ncol = 2
+) +
+  plot_annotation(
+    title = "性别组行为变化对比",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+print(combined_gender_plots)
+
+# ============================================
+# 汽车拥有量组行为变化分析 ----
+# ============================================
+
+cat("\n\n=== 汽车拥有量组行为变化分析 ===\n")
+
+# 创建汽车拥有分组 (有车 vs 无车)
+data <- data %>%
+  mutate(
+    car_group = case_when(
+      car_ownership == "0辆" ~ "无车",
+      car_ownership %in% c("1辆", "2辆", "3辆及以上") ~ "有车",
+      TRUE ~ NA_character_
+    ),
+    car_group = factor(car_group, levels = c("无车", "有车"))
+  )
+
+# --- 辅助函数：按汽车拥有量分析行为变化 ---
+analyze_behavior_by_car <- function(
+    data,
+    pre_col_str,
+    post_col_str,
+    behavior_label
+) {
+
+  pre_sym <- sym(pre_col_str)
+  post_sym <- sym(post_col_str)
+
+  # 数据准备
+  analysis_data <- data %>%
+    filter(q1_used_app == 1) %>%
+    select(!!pre_sym, !!post_sym, car_group) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post) & !is.na(car_group))
+
+  # 组内分析
+  within_group_tests <- analysis_data %>%
+    group_by(car_group) %>%
+    summarise(
+      N = n(),
+      Mean_Pre = round(mean(Pre, na.rm = TRUE), 2),
+      Mean_Post = round(mean(Post, na.rm = TRUE), 2),
+      Mean_Difference = round(mean(Difference, na.rm = TRUE), 3),
+      p = wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$p.value,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      p_signif = case_when(
+        p < 0.001 ~ "***",
+        p < 0.01  ~ "**",
+        p < 0.05  ~ "*",
+        TRUE ~ "ns"
+      )
+    )
+
+  # 组间分析
+  between_test <- wilcox.test(
+    Difference ~ car_group,
+    data = analysis_data,
+    exact = FALSE
+  )
+
+  # 可视化
+  plot_data <- analysis_data %>%
+    pivot_longer(cols = c(Pre, Post), names_to = "Period", values_to = "Score") %>%
+    group_by(car_group, Period) %>%
+    summarise(Mean_Score = mean(Score, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Period = factor(Period, levels = c("Pre", "Post"), labels = c("使用前", "使用后")))
+
+  p <- ggplot(plot_data, aes(x = Period, y = Mean_Score, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = round(Mean_Score, 2)), vjust = -0.5, size = 3) +
+    facet_wrap(~ car_group, nrow = 1) +
+    labs(
+      title = behavior_label,
+      subtitle = paste0("组间差异 P值: ", format.pval(between_test$p.value, digits = 3)),
+      y = "行为平均分"
+    ) +
+    lims(y = c(0, 6)) +
+    theme_minimal() +
+    theme(legend.position = "none", plot.title = element_text(hjust = 0.5, face = "bold"))
+
+  return(list(
+    label = behavior_label,
+    within_tests = within_group_tests,
+    between_test = between_test,
+    plot = p
+  ))
+}
+
+# 批量执行汽车组分析
+car_analysis_results <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_by_car(
+    data = data,
+    pre_col_str = cols[1],
+    post_col_str = cols[2],
+    behavior_label = b
+  )
+})
+
+# 汇总表格
+car_within_results <- do.call(rbind, lapply(car_analysis_results, function(res) {
+  res$within_tests$behavior <- res$label
+  res$within_tests
+})) %>%
+  select(behavior, car_group, N, Mean_Pre, Mean_Post, Mean_Difference, p, p_signif) %>%
+  rename(
+    行为 = behavior,
+    汽车拥有 = car_group,
+    样本量 = N,
+    使用前均值 = Mean_Pre,
+    使用后均值 = Mean_Post,
+    均值差异 = Mean_Difference,
+    组内P值 = p,
+    显著性 = p_signif
+  )
+
+cat("\n--- 汽车拥有组内行为变化分析 ---\n")
+print(knitr::kable(car_within_results, format = "html"))
+
+# 组间对比汇总
+car_between_summary <- data.frame(
+  行为 = sapply(car_analysis_results, `[[`, "label"),
+  组间P值 = sapply(car_analysis_results, function(x)
+    format.pval(x$between_test$p.value, digits = 3)),
+  显著性 = sapply(car_analysis_results, function(x) {
+    p <- x$between_test$p.value
+    ifelse(p < 0.001, "***", ifelse(p < 0.01, "**", ifelse(p < 0.05, "*", "ns")))
+  })
+)
+
+cat("\n--- 汽车拥有组间变化幅度差异 ---\n")
+print(knitr::kable(car_between_summary, format = "html"))
+
+# 可视化
+combined_car_plots <- wrap_plots(
+  lapply(car_analysis_results, `[[`, "plot"),
+  ncol = 2
+) +
+  plot_annotation(
+    title = "汽车拥有组行为变化对比",
+    subtitle = "比较有车与无车群体在APP使用前后的行为变化",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+print(combined_car_plots)
+
+# ============================================
+# 分析结论汇总 ----
+# ============================================
+
+cat("\n\n========================================\n")
+cat("分析结论汇总\n")
+cat("========================================\n")
+
+cat("\n1. 信息渠道分析:\n")
+cat("   - 已完成信息渠道分类编码\n")
+cat("   - 已执行年龄组×信息渠道卡方检验\n")
+
+cat("\n2. 使用障碍/激励偏好的群体差异:\n")
+cat("   - 已分析年龄组、教育组的障碍感知差异\n")
+cat("   - 已分析年龄组、教育组的激励偏好差异\n")
+
+cat("\n3. MCA多重对应分析:\n")
+cat("   - 已探索人口特征与偏好的关联模式\n")
+
+cat("\n4. 新增人口变量行为分析:\n")
+cat("   - 已完成性别组行为变化对比\n")
+cat("   - 已完成汽车拥有组行为变化对比\n")
+
+cat("\n提示: 显著性标记说明\n")
+cat("   *** p < 0.001\n")
+cat("   **  p < 0.01\n")
+cat("   *   p < 0.05\n")
+cat("   ns  不显著\n")
 
