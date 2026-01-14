@@ -3348,88 +3348,6 @@ incentive_by_edu <- analyze_multiselect_by_group(
 )
 
 # ============================================
-# 多重对应分析 (MCA) ----
-# ============================================
-library(FactoMineR)
-library(factoextra)
-
-cat("\n\n=== 多重对应分析 (MCA) ===\n")
-
-# --- 准备MCA数据 ---
-mca_data <- data %>%
-  filter(q1_used_app == 1) %>%  # 仅分析APP用户
-  select(
-    # 人口特征
-    age_group_3,
-    edu_group_4,
-    gender,
-    # 障碍感知
-    q15_barrier_trouble,
-    q15_barrier_privacy,
-    q15_barrier_low_reward,
-    q15_barrier_unknown,
-    # 激励偏好
-    q12_incentive_points,
-    q12_incentive_viz,
-    q12_incentive_ui,
-    q12_incentive_social
-  ) %>%
-  mutate(across(everything(), function(x) factor(as.character(x)))) %>%
-  na.omit()
-
-cat("MCA分析样本量:", nrow(mca_data), "\n")
-
-if (nrow(mca_data) >= 30) {
-  # 执行MCA
-  mca_result <- MCA(mca_data, graph = FALSE)
-
-  # 查看结果摘要
-  cat("\nMCA 结果摘要:\n")
-  print(summary(mca_result, nbelements = 5))
-
-  # 可视化1: 变量贡献图
-  p_mca_var <- fviz_mca_var(
-    mca_result,
-    choice = "var.cat",
-    repel = TRUE,
-    col.var = "contrib",
-    gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
-    title = "MCA: 变量类别分布"
-  )
-  print(p_mca_var)
-
-  # 可视化2: 个体分布（按年龄组着色）
-  p_mca_ind <- fviz_mca_ind(
-    mca_result,
-    label = "none",
-    habillage = mca_data$age_group_3,
-    palette = c("#00AFBB", "#E7B800", "#FC4E07"),
-    addEllipses = TRUE,
-    ellipse.level = 0.95,
-    title = "MCA: 不同年龄组的分布"
-  )
-  print(p_mca_ind)
-
-  # 可视化3: 双标图
-  p_mca_biplot <- fviz_mca_biplot(
-    mca_result,
-    repel = TRUE,
-    habillage = mca_data$age_group_3,
-    addEllipses = TRUE,
-    title = "MCA双标图: 人口特征与偏好关联"
-  )
-  print(p_mca_biplot)
-
-  # 维度描述
-  cat("\n各维度的变量贡献:\n")
-  dim_desc <- dimdesc(mca_result, axes = c(1, 2))
-  print(dim_desc)
-
-} else {
-  cat("警告: 样本量不足，无法执行MCA分析\n")
-}
-
-# ============================================
 # 性别组行为变化分析 ----
 # ============================================
 
@@ -3735,10 +3653,7 @@ cat("\n2. 使用障碍/激励偏好的群体差异:\n")
 cat("   - 已分析年龄组、教育组的障碍感知差异\n")
 cat("   - 已分析年龄组、教育组的激励偏好差异\n")
 
-cat("\n3. MCA多重对应分析:\n")
-cat("   - 已探索人口特征与偏好的关联模式\n")
-
-cat("\n4. 新增人口变量行为分析:\n")
+cat("\n3. 新增人口变量行为分析:\n")
 cat("   - 已完成性别组行为变化对比\n")
 cat("   - 已完成汽车拥有组行为变化对比\n")
 
