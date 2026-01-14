@@ -3663,3 +3663,183 @@ cat("   **  p < 0.01\n")
 cat("   *   p < 0.05\n")
 cat("   ns  不显著\n")
 
+# ============================================
+# 多元回归分析：公交搭乘行为改变的影响因素 ----
+# ============================================
+
+cat("\n\n========================================\n")
+cat("多元回归分析：公交搭乘行为改变的影响因素\n")
+cat("========================================\n")
+
+# 1. 准备回归数据（仅使用过APP的用户）
+reg_data <- data %>%
+  filter(q1_used_app == 1) %>%
+  mutate(
+    # 因变量：行为改变（转为数值）
+    change_public_trans = as.numeric(q18_change_public_trans - q16_pre_public_trans),
+
+    # 人口学变量
+    gender_num = as.numeric(gender == "女"),  # 女=1, 男=0
+    age_num = as.numeric(factor(age, levels = c("1", "2", "3", "4", "5", "6"))),
+    edu_num = as.numeric(factor(education)),
+    income_personal_num = as.numeric(factor(monthly_income_personal)),
+    income_family_num = as.numeric(factor(monthly_income_family)),
+    car_num = as.numeric(car_ownership != "0辆"),  # 有车=1, 无车=0
+
+    # APP使用频率（数值型）
+    app_freq = as.numeric(q10_app_freq),
+
+    # APP使用感知（李克特量表，1-5）
+    perc_ui = as.numeric(q4_ui_simple),
+    perc_platform = as.numeric(q4_integrate_platform),
+    perc_auto = as.numeric(q4_auto_record),
+    perc_guidance = as.numeric(q4_clear_guidance),
+    perc_awareness = as.numeric(q4_raise_awareness),
+    perc_useful = as.numeric(q4_info_feedback_useful),
+    perc_quick = as.numeric(q4_quicker_green_choice),
+    perc_carbon_credit = as.numeric(q4_know_carbon_credit)
+  ) %>%
+  select(
+    change_public_trans,
+    gender_num, age_num, edu_num, income_personal_num, income_family_num, car_num,
+    app_freq,
+    perc_ui, perc_platform, perc_auto, perc_guidance,
+    perc_awareness, perc_useful, perc_quick, perc_carbon_credit
+  ) %>%
+  na.omit()
+
+cat("\n回归分析样本量:", nrow(reg_data), "\n")
+
+# 2. 构建多元回归模型
+# 模型1：仅人口学变量
+model1 <- lm(
+  change_public_trans ~ gender_num + age_num + edu_num +
+    income_personal_num + income_family_num + car_num,
+  data = reg_data
+)
+
+# 模型2：人口学变量 + APP使用频率
+model2 <- lm(
+  change_public_trans ~ gender_num + age_num + edu_num +
+    income_personal_num + income_family_num + car_num +
+    app_freq,
+  data = reg_data
+)
+
+# 模型3：人口学变量 + APP使用频率 + APP使用感知
+model3 <- lm(
+  change_public_trans ~ gender_num + age_num + edu_num +
+    income_personal_num + income_family_num + car_num +
+    app_freq +
+    perc_ui + perc_platform + perc_auto + perc_guidance +
+    perc_awareness + perc_useful + perc_quick + perc_carbon_credit,
+  data = reg_data
+)
+
+# 3. 输出回归结果
+cat("\n--- 模型1：人口学变量 ---\n")
+print(summary(model1))
+
+cat("\n--- 模型2：人口学变量 + APP使用频率 ---\n")
+print(summary(model2))
+
+cat("\n--- 模型3：完整模型（人口学 + 使用频率 + 使用感知）---\n")
+print(summary(model3))
+
+# 4. 模型比较（R²变化）
+cat("\n--- 模型比较 ---\n")
+model_comparison <- data.frame(
+  模型 = c("模型1: 人口学变量",
+           "模型2: +APP使用频率",
+           "模型3: +APP使用感知"),
+  R方 = c(summary(model1)$r.squared,
+          summary(model2)$r.squared,
+          summary(model3)$r.squared),
+  调整R方 = c(summary(model1)$adj.r.squared,
+              summary(model2)$adj.r.squared,
+              summary(model3)$adj.r.squared),
+  F值 = c(summary(model1)$fstatistic[1],
+          summary(model2)$fstatistic[1],
+          summary(model3)$fstatistic[1])
+)
+model_comparison$R方增量 <- c(NA, diff(model_comparison$R方))
+print(knitr::kable(model_comparison, digits = 4, format = "simple"))
+
+# 5. ANOVA模型比较
+cat("\n--- 嵌套模型ANOVA比较 ---\n")
+print(anova(model1, model2, model3))
+
+# 6. 标准化回归系数（完整模型）
+cat("\n--- 标准化回归系数（模型3）---\n")
+reg_data_scaled <- reg_data %>%
+  mutate(across(everything(), scale))
+
+model3_std <- lm(
+  change_public_trans ~ gender_num + age_num + edu_num +
+    income_personal_num + income_family_num + car_num +
+    app_freq +
+    perc_ui + perc_platform + perc_auto + perc_guidance +
+    perc_awareness + perc_useful + perc_quick + perc_carbon_credit,
+  data = reg_data_scaled
+)
+
+std_coef <- data.frame(
+  变量 = c("性别(女)", "年龄", "教育程度", "个人收入", "家庭收入", "有车",
+           "APP使用频率",
+           "界面简洁", "平台打通", "自动记录", "清晰引导",
+           "提高意识", "信息实用", "更快选择", "了解碳普惠"),
+  标准化系数 = coef(model3_std)[-1],
+  P值 = summary(model3_std)$coefficients[-1, 4]
+)
+std_coef$显著性 <- ifelse(std_coef$P值 < 0.001, "***",
+                          ifelse(std_coef$P值 < 0.01, "**",
+                                 ifelse(std_coef$P值 < 0.05, "*", "")))
+std_coef <- std_coef %>% arrange(desc(abs(标准化系数)))
+print(knitr::kable(std_coef, digits = 4, format = "simple"))
+
+# 7. 回归系数可视化
+coef_plot_data <- std_coef %>%
+  mutate(
+    变量 = factor(变量, levels = rev(变量)),
+    方向 = ifelse(标准化系数 > 0, "正向", "负向")
+  )
+
+reg_coef_plot <- ggplot(coef_plot_data, aes(x = 变量, y = 标准化系数, fill = 方向)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = 显著性),
+            hjust = ifelse(coef_plot_data$标准化系数 > 0, -0.3, 1.3),
+            size = 4) +
+  coord_flip() +
+  scale_fill_manual(values = c("正向" = "#4CAF50", "负向" = "#F44336")) +
+  labs(
+    title = "公交搭乘行为改变的影响因素",
+    subtitle = "标准化回归系数（*p<.05, **p<.01, ***p<.001）",
+    x = NULL,
+    y = "标准化回归系数 (β)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 10),
+    legend.position = "bottom"
+  )
+
+print(reg_coef_plot)
+
+# 8. 模型诊断
+cat("\n--- 模型诊断（完整模型）---\n")
+cat("VIF (方差膨胀因子):\n")
+if (requireNamespace("car", quietly = TRUE)) {
+  vif_values <- car::vif(model3)
+  print(round(vif_values, 2))
+  cat("\n注: VIF > 10 表示存在严重多重共线性问题\n")
+} else {
+  cat("请安装 'car' 包以计算VIF: install.packages('car')\n")
+}
+
+cat("\n--- 回归分析结论 ---\n")
+cat("4. 多元回归分析:\n")
+cat("   - 构建了三个层级模型分析公交搭乘行为改变的影响因素\n")
+cat("   - 模型1仅含人口学变量，模型2加入APP使用频率，模型3加入APP使用感知\n")
+cat("   - 通过R²变化和ANOVA检验评估各类变量的解释力增量\n")
+
