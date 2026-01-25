@@ -3664,32 +3664,34 @@ cat("   *   p < 0.05\n")
 cat("   ns  不显著\n")
 
 # ============================================
-# 多元回归分析：公交搭乘行为改变的影响因素 ----
+# 多元回归分析：行为改变的影响因素 ----
 # ============================================
 
 cat("\n\n========================================\n")
-cat("多元回归分析：公交搭乘行为改变的影响因素\n")
+cat("多元回归分析：低碳行为改变的影响因素\n")
 cat("========================================\n")
 
-# 1. 准备回归数据（仅使用过APP的用户）
-reg_data <- data %>%
+# 定义行为映射
+behavior_reg_map <- list(
+  "公共交通" = c(pre = "q16_pre_public_trans", post = "q18_change_public_trans"),
+  "骑行/步行" = c(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk"),
+  "关闭电源" = c(pre = "q16_pre_turn_off_power", post = "q18_change_turn_off_power"),
+  "垃圾分类" = c(pre = "q16_pre_garbage_sort", post = "q18_change_garbage_sort"),
+  "使用环保袋" = c(pre = "q16_pre_reusable_bag", post = "q18_change_reusable_bag"),
+  "选择节能产品" = c(pre = "q16_pre_choose_energy_eff", post = "q18_change_choose_energy_eff")
+)
+
+# 准备基础回归数据（自变量）
+reg_base <- data %>%
   filter(q1_used_app == 1) %>%
   mutate(
-    # 因变量：行为改变（转为数值）
-    change_public_trans = as.numeric(q18_change_public_trans - q16_pre_public_trans),
-
-    # 人口学变量
-    gender_num = as.numeric(gender == "女"),  # 女=1, 男=0
-    age_num = as.numeric(factor(age, levels = c("1", "2", "3", "4", "5", "6"))),
-    edu_num = as.numeric(factor(education)),
-    income_personal_num = as.numeric(factor(monthly_income_personal)),
-    income_family_num = as.numeric(factor(monthly_income_family)),
-    car_num = as.numeric(car_ownership != "0辆"),  # 有车=1, 无车=0
-
-    # APP使用频率（数值型）
+    gender_num = as.numeric(gender == "女"),
+    age_num = as.numeric(age),  # 因子转数值（按level顺序）
+    edu_num = as.numeric(education),
+    income_personal_num = as.numeric(monthly_income_personal),
+    income_family_num = as.numeric(monthly_income_family),
+    car_num = as.numeric(car_ownership != "0辆"),
     app_freq = as.numeric(q10_app_freq),
-
-    # APP使用感知（李克特量表，1-5）
     perc_ui = as.numeric(q4_ui_simple),
     perc_platform = as.numeric(q4_integrate_platform),
     perc_auto = as.numeric(q4_auto_record),
@@ -3698,148 +3700,143 @@ reg_data <- data %>%
     perc_useful = as.numeric(q4_info_feedback_useful),
     perc_quick = as.numeric(q4_quicker_green_choice),
     perc_carbon_credit = as.numeric(q4_know_carbon_credit)
-  ) %>%
-  select(
-    change_public_trans,
-    gender_num, age_num, edu_num, income_personal_num, income_family_num, car_num,
-    app_freq,
-    perc_ui, perc_platform, perc_auto, perc_guidance,
-    perc_awareness, perc_useful, perc_quick, perc_carbon_credit
-  ) %>%
-  na.omit()
+  )
 
-cat("\n回归分析样本量:", nrow(reg_data), "\n")
 
-# 2. 构建多元回归模型
-# 模型1：仅人口学变量
-model1 <- lm(
-  change_public_trans ~ gender_num + age_num + edu_num +
-    income_personal_num + income_family_num + car_num,
-  data = reg_data
+# 自变量名称
+pred_vars <- c("gender_num", "age_num", "edu_num", "income_personal_num",
+               "income_family_num", "car_num", "app_freq", "perc_ui",
+               "perc_platform", "perc_auto", "perc_guidance", "perc_awareness",
+               "perc_useful", "perc_quick", "perc_carbon_credit")
+
+pred_labels <- c("性别(女)", "年龄", "教育程度", "个人收入", "家庭收入", "有车",
+                 "APP使用频率", "界面简洁", "平台打通", "自动记录", "清晰引导",
+                 "提高意识", "信息实用", "更快选择", "了解碳普惠")
+
+# 诊断：检查数据
+cat("\n--- 数据诊断 ---\n")
+cat("APP用户数量:", nrow(reg_base), "\n")
+cat("自变量NA数量:\n")
+print(sapply(reg_base[, pred_vars], function(x) sum(is.na(x))))
+cat("\n行为变量检查(公共交通):\n")
+cat("q16_pre 类型:", class(reg_base$q16_pre_public_trans), "\n")
+cat("q18_change 类型:", class(reg_base$q18_change_public_trans), "\n")
+cat("q16_pre 前5值:", paste(head(reg_base$q16_pre_public_trans, 5), collapse=", "), "\n")
+cat("q18_change 前5值:", paste(head(reg_base$q18_change_public_trans, 5), collapse=", "), "\n")
+
+# 回归分析函数
+run_behavior_regression <- function(behavior_name, pre_col, post_col) {
+  print(behavior_name)
+  # 准备数据
+  reg_data <- reg_base %>%
+    mutate(change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]])) %>%
+    select(change, all_of(pred_vars)) %>%
+    na.omit()
+
+  # 完整模型
+  model <- lm(change ~ ., data = reg_data)
+  model_summary <- summary(model)
+  print(model_summary)
+
+  # 标准化模型
+  # reg_scaled <- reg_data %>% mutate(across(everything(), scale))
+  # model_std <- lm(change ~ ., data = reg_scaled)
+
+  # 提取结果
+  # coefs <- data.frame(
+  #   行为 = behavior_name,
+  #   变量 = pred_labels,
+  #   B = coef(model)[-1],
+  #   Beta = coef(model_std)[-1],
+  #   P值 = model_summary$coefficients[-1, 4]
+  # )
+  # coefs$显著性 <- ifelse(coefs$P值 < 0.001, "***",
+  #                        ifelse(coefs$P值 < 0.01, "**",
+  #                               ifelse(coefs$P值 < 0.05, "*", "")))
+  # 
+  # list(
+  #   behavior = behavior_name,
+  #   n = nrow(reg_data),
+  #   r_squared = model_summary$r.squared,
+  #   adj_r_squared = model_summary$adj.r.squared,
+  #   f_stat = model_summary$fstatistic[1],
+  #   p_value = pf(model_summary$fstatistic[1], model_summary$fstatistic[2],
+  #                model_summary$fstatistic[3], lower.tail = FALSE),
+  #   coefficients = coefs,
+  #   model = model
+  # )
+}
+
+# 执行所有行为的回归分析
+reg_results <- lapply(names(behavior_reg_map), function(name) {
+  run_behavior_regression(name, behavior_reg_map[[name]][["pre"]], behavior_reg_map[[name]][["post"]])
+})
+names(reg_results) <- names(behavior_reg_map)
+
+# 汇总表：模型拟合指标
+model_fit_summary <- data.frame(
+  行为 = sapply(reg_results, `[[`, "behavior"),
+  样本量 = sapply(reg_results, `[[`, "n"),
+  R方 = sapply(reg_results, `[[`, "r_squared"),
+  调整R方 = sapply(reg_results, `[[`, "adj_r_squared"),
+  F值 = sapply(reg_results, `[[`, "f_stat"),
+  P值 = sapply(reg_results, `[[`, "p_value")
 )
+model_fit_summary$显著性 <- ifelse(model_fit_summary$P值 < 0.001, "***",
+                                   ifelse(model_fit_summary$P值 < 0.01, "**",
+                                          ifelse(model_fit_summary$P值 < 0.05, "*", "")))
 
-# 模型2：人口学变量 + APP使用频率
-model2 <- lm(
-  change_public_trans ~ gender_num + age_num + edu_num +
-    income_personal_num + income_family_num + car_num +
-    app_freq,
-  data = reg_data
-)
+cat("\n--- 各行为回归模型拟合指标 ---\n")
+print(knitr::kable(model_fit_summary, digits = 4, format = "simple"))
 
-# 模型3：人口学变量 + APP使用频率 + APP使用感知
-model3 <- lm(
-  change_public_trans ~ gender_num + age_num + edu_num +
-    income_personal_num + income_family_num + car_num +
-    app_freq +
-    perc_ui + perc_platform + perc_auto + perc_guidance +
-    perc_awareness + perc_useful + perc_quick + perc_carbon_credit,
-  data = reg_data
-)
+# 汇总表：各行为的标准化回归系数
+all_coefs <- do.call(rbind, lapply(reg_results, `[[`, "coefficients"))
+rownames(all_coefs) <- NULL
 
-# 3. 输出回归结果
-cat("\n--- 模型1：人口学变量 ---\n")
-print(summary(model1))
+# 宽格式：每行一个变量，每列一个行为的Beta
+coef_wide <- all_coefs %>%
+  mutate(Beta_sig = paste0(round(Beta, 3), 显著性)) %>%
+  select(行为, 变量, Beta_sig) %>%
+  pivot_wider(names_from = 行为, values_from = Beta_sig)
 
-cat("\n--- 模型2：人口学变量 + APP使用频率 ---\n")
-print(summary(model2))
+cat("\n--- 标准化回归系数汇总（Beta）---\n")
+print(knitr::kable(coef_wide, format = "simple"))
 
-cat("\n--- 模型3：完整模型（人口学 + 使用频率 + 使用感知）---\n")
-print(summary(model3))
-
-# 4. 模型比较（R²变化）
-cat("\n--- 模型比较 ---\n")
-model_comparison <- data.frame(
-  模型 = c("模型1: 人口学变量",
-           "模型2: +APP使用频率",
-           "模型3: +APP使用感知"),
-  R方 = c(summary(model1)$r.squared,
-          summary(model2)$r.squared,
-          summary(model3)$r.squared),
-  调整R方 = c(summary(model1)$adj.r.squared,
-              summary(model2)$adj.r.squared,
-              summary(model3)$adj.r.squared),
-  F值 = c(summary(model1)$fstatistic[1],
-          summary(model2)$fstatistic[1],
-          summary(model3)$fstatistic[1])
-)
-model_comparison$R方增量 <- c(NA, diff(model_comparison$R方))
-print(knitr::kable(model_comparison, digits = 4, format = "simple"))
-
-# 5. ANOVA模型比较
-cat("\n--- 嵌套模型ANOVA比较 ---\n")
-print(anova(model1, model2, model3))
-
-# 6. 标准化回归系数（完整模型）
-cat("\n--- 标准化回归系数（模型3）---\n")
-reg_data_scaled <- reg_data %>%
-  mutate(across(everything(), scale))
-
-model3_std <- lm(
-  change_public_trans ~ gender_num + age_num + edu_num +
-    income_personal_num + income_family_num + car_num +
-    app_freq +
-    perc_ui + perc_platform + perc_auto + perc_guidance +
-    perc_awareness + perc_useful + perc_quick + perc_carbon_credit,
-  data = reg_data_scaled
-)
-
-std_coef <- data.frame(
-  变量 = c("性别(女)", "年龄", "教育程度", "个人收入", "家庭收入", "有车",
-           "APP使用频率",
-           "界面简洁", "平台打通", "自动记录", "清晰引导",
-           "提高意识", "信息实用", "更快选择", "了解碳普惠"),
-  标准化系数 = coef(model3_std)[-1],
-  P值 = summary(model3_std)$coefficients[-1, 4]
-)
-std_coef$显著性 <- ifelse(std_coef$P值 < 0.001, "***",
-                          ifelse(std_coef$P值 < 0.01, "**",
-                                 ifelse(std_coef$P值 < 0.05, "*", "")))
-std_coef <- std_coef %>% arrange(desc(abs(标准化系数)))
-print(knitr::kable(std_coef, digits = 4, format = "simple"))
-
-# 7. 回归系数可视化
-coef_plot_data <- std_coef %>%
+# 可视化：各行为显著预测因子热力图
+sig_coefs <- all_coefs %>%
+  filter(P值 < 0.05) %>%
   mutate(
-    变量 = factor(变量, levels = rev(变量)),
-    方向 = ifelse(标准化系数 > 0, "正向", "负向")
+    行为 = factor(行为, levels = names(behavior_reg_map)),
+    变量 = factor(变量, levels = rev(pred_labels))
   )
 
-reg_coef_plot <- ggplot(coef_plot_data, aes(x = 变量, y = 标准化系数, fill = 方向)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = 显著性),
-            hjust = ifelse(coef_plot_data$标准化系数 > 0, -0.3, 1.3),
-            size = 4) +
-  coord_flip() +
-  scale_fill_manual(values = c("正向" = "#4CAF50", "负向" = "#F44336")) +
-  labs(
-    title = "公交搭乘行为改变的影响因素",
-    subtitle = "标准化回归系数（*p<.05, **p<.01, ***p<.001）",
-    x = NULL,
-    y = "标准化回归系数 (β)"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
-    plot.subtitle = element_text(hjust = 0.5, size = 10),
-    legend.position = "bottom"
-  )
+if (nrow(sig_coefs) > 0) {
+  reg_heatmap <- ggplot(sig_coefs, aes(x = 行为, y = 变量, fill = Beta)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = paste0(round(Beta, 2), 显著性)), size = 3) +
+    scale_fill_gradient2(low = "#F44336", mid = "white", high = "#4CAF50", midpoint = 0) +
+    labs(
+      title = "低碳行为改变的显著预测因子",
+      subtitle = "标准化回归系数（仅显示p<.05）",
+      x = NULL, y = NULL, fill = "Beta"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  print(reg_heatmap)
+}
 
-print(reg_coef_plot)
-
-# 8. 模型诊断
-cat("\n--- 模型诊断（完整模型）---\n")
-cat("VIF (方差膨胀因子):\n")
-if (requireNamespace("car", quietly = TRUE)) {
-  vif_values <- car::vif(model3)
-  print(round(vif_values, 2))
-  cat("\n注: VIF > 10 表示存在严重多重共线性问题\n")
-} else {
-  cat("请安装 'car' 包以计算VIF: install.packages('car')\n")
+# 输出各行为详细结果
+for (name in names(reg_results)) {
+  cat("\n\n---", name, "回归详细结果 ---\n")
+  print(summary(reg_results[[name]]$model))
 }
 
 cat("\n--- 回归分析结论 ---\n")
 cat("4. 多元回归分析:\n")
-cat("   - 构建了三个层级模型分析公交搭乘行为改变的影响因素\n")
-cat("   - 模型1仅含人口学变量，模型2加入APP使用频率，模型3加入APP使用感知\n")
-cat("   - 通过R²变化和ANOVA检验评估各类变量的解释力增量\n")
+cat("   - 对6种低碳行为改变分别建立回归模型\n")
+cat("   - 因变量为行为改变量（使用后得分 - 使用前得分）\n")
+cat("   - 自变量包括人口学变量、APP使用频率、APP使用感知\n")
 
