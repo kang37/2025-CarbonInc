@@ -3840,3 +3840,102 @@ cat("   - 对6种低碳行为改变分别建立回归模型\n")
 cat("   - 因变量为行为改变量（使用后得分 - 使用前得分）\n")
 cat("   - 自变量包括人口学变量、APP使用频率、APP使用感知\n")
 
+# ============================================================
+# 模型A：仅人口统计变量
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型A：仅人口统计变量的回归分析\n")
+cat("========================================\n")
+
+pred_demo <- c("gender_num", "age_num", "edu_num",
+               "income_personal_num", "income_family_num", "car_num")
+
+for (name in names(behavior_reg_map)) {
+  pre_col <- behavior_reg_map[[name]][["pre"]]
+  post_col <- behavior_reg_map[[name]][["post"]]
+
+  reg_data_a <- reg_base %>%
+    mutate(change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]])) %>%
+    select(change, all_of(pred_demo)) %>%
+    na.omit()
+
+  model_a <- lm(change ~ ., data = reg_data_a)
+  cat("\n\n---", name, "（模型A：人口统计变量）---\n")
+  print(summary(model_a))
+}
+
+# ============================================================
+# 模型B：仅APP感知变量
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型B：仅APP感知变量的回归分析\n")
+cat("========================================\n")
+
+pred_app <- c("app_freq", "perc_ui", "perc_platform", "perc_auto",
+              "perc_guidance", "perc_awareness", "perc_useful",
+              "perc_quick", "perc_carbon_credit")
+
+for (name in names(behavior_reg_map)) {
+  pre_col <- behavior_reg_map[[name]][["pre"]]
+  post_col <- behavior_reg_map[[name]][["post"]]
+
+  reg_data_b <- reg_base %>%
+    mutate(change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]])) %>%
+    select(change, all_of(pred_app)) %>%
+    na.omit()
+
+  model_b <- lm(change ~ ., data = reg_data_b)
+  cat("\n\n---", name, "（模型B：APP感知变量）---\n")
+  print(summary(model_b))
+}
+
+# ============================================================
+# 模型C：逐步回归（从全模型出发，双向筛选）
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型C：逐步回归分析（双向筛选）\n")
+cat("========================================\n")
+
+for (name in names(behavior_reg_map)) {
+  pre_col <- behavior_reg_map[[name]][["pre"]]
+  post_col <- behavior_reg_map[[name]][["post"]]
+
+  reg_data_c <- reg_base %>%
+    mutate(change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]])) %>%
+    select(change, all_of(pred_vars)) %>%
+    na.omit()
+
+  full_model <- lm(change ~ ., data = reg_data_c)
+  step_model <- step(full_model, direction = "both", trace = 0)
+  cat("\n\n---", name, "（模型C：逐步回归）---\n")
+  cat("保留变量:", paste(names(coef(step_model))[-1], collapse = ", "), "\n")
+  print(summary(step_model))
+}
+
+# ============================================================
+# 模型D：Logistic回归（是否改善）
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型D：Logistic回归（是否改善）\n")
+cat("========================================\n")
+
+for (name in names(behavior_reg_map)) {
+  pre_col <- behavior_reg_map[[name]][["pre"]]
+  post_col <- behavior_reg_map[[name]][["post"]]
+
+  reg_data_d <- reg_base %>%
+    mutate(
+      change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]]),
+      improved = as.integer(change > 0)
+    ) %>%
+    select(improved, all_of(pred_vars)) %>%
+    na.omit()
+
+  cat("\n\n---", name, "（模型D：Logistic回归）---\n")
+  cat("改善人数:", sum(reg_data_d$improved), "/", nrow(reg_data_d),
+      "(", round(mean(reg_data_d$improved) * 100, 1), "%)\n")
+
+  model_d <- glm(improved ~ ., data = reg_data_d, family = binomial)
+  print(summary(model_d))
+}
+
