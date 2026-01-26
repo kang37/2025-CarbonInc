@@ -3705,11 +3705,11 @@ reg_base <- data %>%
 
 # 自变量名称
 pred_vars <- c("gender_num", "age_num", "edu_num", "income_personal_num",
-               "income_family_num", "car_num", "app_freq", "perc_ui",
+               "income_family_num", "app_freq", "perc_ui",
                "perc_platform", "perc_auto", "perc_guidance", "perc_awareness",
                "perc_useful", "perc_quick", "perc_carbon_credit")
 
-pred_labels <- c("性别(女)", "年龄", "教育程度", "个人收入", "家庭收入", "有车",
+pred_labels <- c("性别(女)", "年龄", "教育程度", "个人收入", "家庭收入",
                  "APP使用频率", "界面简洁", "平台打通", "自动记录", "清晰引导",
                  "提高意识", "信息实用", "更快选择", "了解碳普惠")
 
@@ -3848,7 +3848,7 @@ cat("模型A：仅人口统计变量的回归分析\n")
 cat("========================================\n")
 
 pred_demo <- c("gender_num", "age_num", "edu_num",
-               "income_personal_num", "income_family_num", "car_num")
+               "income_personal_num", "income_family_num")
 
 for (name in names(behavior_reg_map)) {
   pre_col <- behavior_reg_map[[name]][["pre"]]
@@ -3937,5 +3937,32 @@ for (name in names(behavior_reg_map)) {
 
   model_d <- glm(improved ~ ., data = reg_data_d, family = binomial)
   print(summary(model_d))
+}
+
+# ============================================================
+# 模型E：Logistic回归（仅APP感知变量）
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型E：Logistic回归（仅APP感知变量）\n")
+cat("========================================\n")
+
+for (name in names(behavior_reg_map)) {
+  pre_col <- behavior_reg_map[[name]][["pre"]]
+  post_col <- behavior_reg_map[[name]][["post"]]
+
+  reg_data_e <- reg_base %>%
+    mutate(
+      change = as.numeric(.data[[post_col]]) - as.numeric(.data[[pre_col]]),
+      improved = as.integer(change > 0)
+    ) %>%
+    select(improved, all_of(pred_app)) %>%
+    na.omit()
+
+  cat("\n\n---", name, "（模型E：Logistic回归，仅APP感知变量）---\n")
+  cat("改善人数:", sum(reg_data_e$improved), "/", nrow(reg_data_e),
+      "(", round(mean(reg_data_e$improved) * 100, 1), "%)\n")
+
+  model_e <- glm(improved ~ ., data = reg_data_e, family = binomial)
+  print(summary(model_e))
 }
 
