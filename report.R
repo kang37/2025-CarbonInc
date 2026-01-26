@@ -3966,3 +3966,134 @@ for (name in names(behavior_reg_map)) {
   print(summary(model_e))
 }
 
+# ============================================================
+# 行为改变相关矩阵分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("行为改变量的相关矩阵分析\n")
+cat("========================================\n")
+
+# 构建行为改变量矩阵（仅APP用户）
+change_matrix <- data %>%
+  filter(q1_used_app == 1) %>%
+  transmute(
+    公共交通 = as.numeric(q18_change_public_trans) - as.numeric(q16_pre_public_trans),
+    骑行步行 = as.numeric(q18_change_bike_walk) - as.numeric(q16_pre_bike_walk),
+    关闭电源 = as.numeric(q18_change_turn_off_power) - as.numeric(q16_pre_turn_off_power),
+    垃圾分类 = as.numeric(q18_change_garbage_sort) - as.numeric(q16_pre_garbage_sort),
+    使用环保袋 = as.numeric(q18_change_reusable_bag) - as.numeric(q16_pre_reusable_bag),
+    节能电器 = as.numeric(q18_change_choose_energy_eff) - as.numeric(q16_pre_choose_energy_eff)
+  ) %>%
+  na.omit()
+
+# Spearman相关矩阵
+cor_mat <- cor(change_matrix, method = "spearman")
+cat("\n--- Spearman相关系数矩阵 ---\n")
+print(round(cor_mat, 3))
+
+# 相关显著性检验
+cor_pmat <- matrix(NA, ncol = 6, nrow = 6,
+                   dimnames = list(names(change_matrix), names(change_matrix)))
+for (i in 1:6) {
+  for (j in 1:6) {
+    if (i != j) {
+      test <- cor.test(change_matrix[[i]], change_matrix[[j]], method = "spearman")
+      cor_pmat[i, j] <- test$p.value
+    }
+  }
+}
+cat("\n--- 相关显著性p值矩阵 ---\n")
+print(round(cor_pmat, 4))
+
+# 相关矩阵热力图
+cor_long <- as.data.frame(as.table(cor_mat))
+names(cor_long) <- c("行为1", "行为2", "相关系数")
+
+# 添加显著性标记
+cor_long$p值 <- as.vector(as.table(cor_pmat))
+cor_long$显著性 <- ifelse(is.na(cor_long$p值), "",
+                          ifelse(cor_long$p值 < 0.001, "***",
+                                 ifelse(cor_long$p值 < 0.01, "**",
+                                        ifelse(cor_long$p值 < 0.05, "*", ""))))
+cor_long$标签 <- ifelse(cor_long$行为1 == cor_long$行为2, "",
+                        paste0(round(cor_long$相关系数, 2), cor_long$显著性))
+
+cor_heatmap <- ggplot(cor_long, aes(x = 行为1, y = 行为2, fill = 相关系数)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = 标签), size = 3.5) +
+  scale_fill_gradient2(low = "#2196F3", mid = "white", high = "#F44336",
+                       midpoint = 0, limits = c(-1, 1)) +
+  labs(
+    title = "低碳行为改变量的相关矩阵",
+    subtitle = "Spearman相关系数（*p<.05, **p<.01, ***p<.001）",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+print(cor_heatmap)
+
+# ============================================================
+# 行为改善共现分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("行为改善共现分析\n")
+cat("========================================\n")
+
+# 构建是否改善的二分矩阵
+improve_matrix <- change_matrix %>%
+  mutate(across(everything(), ~ as.integer(. > 0)))
+
+cat("\n--- 各行为改善人数 ---\n")
+print(colSums(improve_matrix))
+cat("总样本:", nrow(improve_matrix), "\n")
+
+# 共现计数矩阵：两种行为同时改善的人数
+behavior_names <- names(improve_matrix)
+n_beh <- length(behavior_names)
+co_occur_count <- matrix(0, nrow = n_beh, ncol = n_beh,
+                         dimnames = list(behavior_names, behavior_names))
+for (i in 1:n_beh) {
+  for (j in 1:n_beh) {
+    co_occur_count[i, j] <- sum(improve_matrix[[i]] == 1 & improve_matrix[[j]] == 1)
+  }
+}
+
+cat("\n--- 共现计数矩阵（同时改善人数）---\n")
+print(co_occur_count)
+
+# 共现比例矩阵：在改善了行为i的人中，同时改善行为j的比例
+co_occur_pct <- co_occur_count
+for (i in 1:n_beh) {
+  if (co_occur_count[i, i] > 0) {
+    co_occur_pct[i, ] <- round(co_occur_count[i, ] / co_occur_count[i, i] * 100, 1)
+  }
+}
+cat("\n--- 共现比例矩阵（行方向：改善行为i的人中同时改善j的%）---\n")
+print(co_occur_pct)
+
+# 共现热力图
+co_long <- as.data.frame(as.table(co_occur_count))
+names(co_long) <- c("行为1", "行为2", "共现人数")
+
+# 对角线上显示各行为改善总人数，非对角线显示共现人数
+co_long$标签 <- as.character(co_long$共现人数)
+
+co_heatmap <- ggplot(co_long, aes(x = 行为1, y = 行为2, fill = 共现人数)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = 标签), size = 4) +
+  scale_fill_gradient(low = "white", high = "#4CAF50") +
+  labs(
+    title = "低碳行为改善的共现关系",
+    subtitle = "数字为同时改善两种行为的人数（对角线为各行为改善总数）",
+    x = NULL, y = NULL, fill = "人数"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+print(co_heatmap)
+
