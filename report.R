@@ -930,9 +930,7 @@ for (res in analysis_results) {
   cat("均值差异:", res$t_test$estimate, "\n")
   cat("配对 t 检验 P 值:", format.pval(res$t_test$p.value, digits = 4), "\n")
 }
-# 
-# # 组合所有图表 (使用 patchwork)
-Reduce(`+`, lapply(analysis_results, function(x) x$plot))
+# （已合并为 combined_behavior_plot，不再单独出图）
 
 # 其他 ----
 # 未来功能
@@ -1111,10 +1109,61 @@ kable(results_table,
   row_spec(which(results_table$显著性 %in% c("*", "**", "***")), 
            background = "#D4EDDA")  # 显著结果高亮
 
+# （已合并为 combined_behavior_plot，不再单独出图）
+
 # ----------------------------------------------------------------------
-# 组合所有图表 (使用 patchwork)
-combined_plot <- Reduce(`+`, lapply(analysis_results_wilcoxon, function(x) x$plot))
-print(combined_plot)
+# 合并图：所有行为前后对比（均值 + 中位数 + 显著性）
+# ----------------------------------------------------------------------
+
+# 构建合并数据
+combined_data <- do.call(rbind, lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  pre_sym <- sym(cols[1])
+  post_sym <- sym(cols[2])
+
+  d <- data %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym)
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post))
+
+  data.frame(
+    行为 = rep(b, 2),
+    时期 = c("使用前", "使用后"),
+    均值 = c(mean(d$Pre), mean(d$Post)),
+    SE = c(sd(d$Pre) / sqrt(nrow(d)), sd(d$Post) / sqrt(nrow(d)))
+  )
+}))
+combined_data$行为 <- factor(combined_data$行为, levels = names(behavior_map))
+combined_data$时期 <- factor(combined_data$时期, levels = c("使用前", "使用后"))
+
+combined_behavior_plot <- ggplot(combined_data,
+    aes(x = 行为, y = 均值, fill = 时期)) +
+  geom_col(position = position_dodge(0.7), width = 0.6, alpha = 0.85) +
+  geom_errorbar(
+    aes(ymin = 均值 - SE, ymax = 均值 + SE),
+    position = position_dodge(0.7), width = 0.2
+  ) +
+  geom_text(
+    aes(label = round(均值, 2)),
+    position = position_dodge(0.7), vjust = -1.2, size = 3.2
+  ) +
+  scale_fill_manual(values = c("使用前" = "#93C5FD", "使用后" = "#86EFAC")) +
+  labs(
+    title = "低碳行为使用APP前后对比",
+    subtitle = "均值 ± SE",
+    x = NULL, y = "行为得分", fill = NULL
+  ) +
+  ylim(0, max(combined_data$均值 + combined_data$SE) + 0.6) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(size = 10),
+    legend.position = "top"
+  )
+print(combined_behavior_plot)
 
 # 绘制前后行为打分比例。
 library(dplyr)
@@ -1241,46 +1290,48 @@ plot_behavior_sankey <- function(
   # 2. 计算流量（Pre -> Post 的转换）
   flow_data <- analysis_data %>%
     group_by(Pre, Post) %>%
-    summarise(Count = n(), .groups = 'drop') %>%
-    mutate(
-      Pre_label = paste0("使用前: ", Pre),
-      Post_label = paste0("使用后: ", Post)
-    )
-  
+    summarise(Count = n(), .groups = 'drop')
+
   # 3. 转换为 ggsankey 格式
   sankey_data <- flow_data %>%
-    make_long(Pre_label, Post_label, value = Count)
-  
-  # 4. 定义颜色方案
-  color_palette <- c(
-    "使用前: 1" = "#D32F2F", "使用后: 1" = "#D32F2F",
-    "使用前: 2" = "#F57C00", "使用后: 2" = "#F57C00",
-    "使用前: 3" = "#FDD835", "使用后: 3" = "#FDD835",
-    "使用前: 4" = "#66BB6A", "使用后: 4" = "#66BB6A",
-    "使用前: 5" = "#2E7D32", "使用后: 5" = "#2E7D32"
+    make_long(Pre, Post, value = Count)
+
+  # 4. 提取得分数字用于颜色映射
+  sankey_data$score <- as.character(gsub(".*(\\d)$", "\\1", sankey_data$node))
+
+  # 5. 定义颜色方案（按得分）
+  score_palette <- c(
+    "1" = "#D32F2F",
+    "2" = "#F57C00",
+    "3" = "#FDD835",
+    "4" = "#66BB6A",
+    "5" = "#2E7D32"
   )
-  
-  # 5. 绘制桑基图
+
+  # 6. 绘制桑基图
   p <- ggplot(sankey_data, aes(
     x = x,
     next_x = next_x,
     node = node,
     next_node = next_node,
-    fill = node,
-    value = value,
-    label = node
+    fill = score,
+    value = value
   )) +
     geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.1) +
-    geom_sankey_label(size = 3, color = "black", fill = "white", alpha = 0.7) +
-    scale_fill_manual(values = color_palette) +
+    scale_fill_manual(
+      values = score_palette,
+      name = "行为得分",
+      labels = c("1" = "1 (很少)", "2" = "2", "3" = "3", "4" = "4", "5" = "5 (频繁)")
+    ) +
+    scale_x_discrete(labels = c("Pre" = "使用前", "Post" = "使用后")) +
     labs(
-      title = behavior_label, x = NULL, y = "人数"
+      title = behavior_label, x = NULL, y = NULL
     ) +
     theme_minimal() +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
       legend.position = "none",
-      axis.text.x = element_blank(),
+      axis.text.x = element_text(size = 9),
       axis.text.y = element_text(size = 9),
       panel.grid = element_blank()
     )
@@ -1300,9 +1351,13 @@ sankey_plots <- lapply(names(behavior_map), function(b) {
   )
 })
 
-# 组合显示（使用 patchwork）
+# 最后一张子图显示图例，其余隐藏
+sankey_plots[[length(sankey_plots)]] <- sankey_plots[[length(sankey_plots)]] +
+  theme(legend.position = "right")
+
+# 组合显示（使用 patchwork，统一图例）
 combined_sankey <- Reduce(`+`, sankey_plots) +
-  plot_layout(ncol = 2)
+  plot_layout(ncol = 2, guides = "collect")
 
 print(combined_sankey)
 
