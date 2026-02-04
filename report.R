@@ -647,10 +647,11 @@ print(q13_heatmap)
 
 ## Q13 分群体分析 ----
 # 通用函数：按群体绘制Q13条形图
-plot_q13_by_group <- function(data, group_var, group_label) {
-  # 准备数据
+plot_q13_by_group <- function(data, group_var, group_label, q13_cols, q13_titles_map) {
+  # 准备数据：先把Q13列转为数值
   plot_data <- data %>%
     select(all_of(c(group_var, q13_cols))) %>%
+    mutate(across(all_of(q13_cols), as.numeric)) %>%
     rename(group = !!sym(group_var)) %>%
     filter(!is.na(group)) %>%
     pivot_longer(
@@ -658,18 +659,29 @@ plot_q13_by_group <- function(data, group_var, group_label) {
       names_to = "Variable",
       values_to = "Value"
     ) %>%
-    mutate(Value = as.numeric(Value)) %>%
-    filter(Value == 1) %>%
+    filter(!is.na(Value) & Value == 1) %>%
     group_by(group, Variable) %>%
     summarise(Count = n(), .groups = 'drop') %>%
-    # 计算各群体内的百分比
-    group_by(group) %>%
-    mutate(
-      Total = sum(Count),
-      Pct = Count / sum(Count) * 100
+    # 计算各群体内的总人数和百分比
+    left_join(
+      data %>%
+        select(all_of(group_var)) %>%
+        rename(group = !!sym(group_var)) %>%
+        filter(!is.na(group)) %>%
+        group_by(group) %>%
+        summarise(GroupN = n(), .groups = 'drop'),
+      by = "group"
     ) %>%
-    ungroup() %>%
-    mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
+    mutate(
+      Pct = Count / GroupN * 100,
+      Option = factor(q13_titles_map[Variable], levels = q13_titles_map)
+    )
+
+  # 检查数据是否为空
+  if (nrow(plot_data) == 0) {
+    message("警告: 无数据可绑图")
+    return(NULL)
+  }
 
   # 绘制分面条形图（按百分比）
   p <- ggplot(plot_data, aes(x = reorder(Option, Pct), y = Pct, fill = group)) +
@@ -680,7 +692,7 @@ plot_q13_by_group <- function(data, group_var, group_label) {
     coord_flip() +
     labs(
       title = paste0("Q13: 最能吸引您使用的功能 (按", group_label, "分组)"),
-      subtitle = "各群体内选择该选项的比例",
+      subtitle = "各群体中选择该选项的人数占比",
       x = "吸引因素",
       y = "选择比例 (%)",
       fill = group_label
@@ -691,67 +703,72 @@ plot_q13_by_group <- function(data, group_var, group_label) {
       plot.subtitle = element_text(hjust = 0.5),
       legend.position = "bottom"
     ) +
-    scale_y_continuous(limits = c(0, max(plot_data$Pct) * 1.15))
+    scale_y_continuous(limits = c(0, max(plot_data$Pct, na.rm = TRUE) * 1.15))
 
   return(p)
 }
 
-# 按性别分组
-q13_by_gender <- plot_q13_by_group(data, "gender", "性别")
-print(q13_by_gender)
-
-# 按年龄分组（使用3分组）
+# 先创建分组变量
 data <- data %>%
   mutate(
-    age_group_3 = case_when(
-      age %in% c("18-25岁", "26-35岁") ~ "青年(18-35)",
-      age %in% c("36-45岁", "46-55岁") ~ "中年(36-55)",
-      age %in% c("56-65岁", "65岁以上") ~ "老年(56+)",
-      TRUE ~ NA_character_
-    )
-  )
-q13_by_age <- plot_q13_by_group(data, "age_group_3", "年龄段")
-print(q13_by_age)
-
-# 按教育程度分组
-data <- data %>%
-  mutate(
+    # 年龄3分组（青年组/中年组/银发组）- 与后续分析一致
+    # 兼容文字格式和数字编码
+    age_group_3 = factor(
+      case_when(
+        age %in% c("18-25岁", "26-35岁", "1", "2", "3") ~ "青年组 (0-30岁)",
+        age %in% c("36-45岁", "46-55岁", "4", "5") ~ "中年组 (31-50岁)",
+        age %in% c("56-65岁", "65岁以上", "6") ~ "银发组 (>=51岁)",
+        TRUE ~ NA_character_
+      ),
+      levels = c("青年组 (0-30岁)", "中年组 (31-50岁)", "银发组 (>=51岁)")
+    ),
+    # 原始年龄6分组
+    age_group_6 = factor(age, levels = c("18-25岁", "26-35岁", "36-45岁",
+                                          "46-55岁", "56-65岁", "65岁以上")),
+    # 教育程度分组
     edu_group = case_when(
       education %in% c("初中及以下", "高中/中专/技校") ~ "高中及以下",
       education == "大专" ~ "大专",
       education == "本科" ~ "本科",
       education %in% c("硕士", "博士") ~ "研究生",
       TRUE ~ NA_character_
-    )
-  )
-q13_by_edu <- plot_q13_by_group(data, "edu_group", "教育程度")
-print(q13_by_edu)
-
-# 按收入分组
-data <- data %>%
-  mutate(
+    ),
+    # 收入分组
     income_group = case_when(
       monthly_income_personal %in% c("3000元以下", "3001-5000元") ~ "低收入(<5000)",
       monthly_income_personal %in% c("5001-8000元", "8001-12000元") ~ "中收入(5000-12000)",
       monthly_income_personal %in% c("12001-20000元", "20001-30000元", "30000元以上") ~ "高收入(>12000)",
       TRUE ~ NA_character_
-    )
+    ),
+    # APP使用分组
+    app_user = ifelse(q1_used_app == 1, "APP用户", "非APP用户")
   )
-q13_by_income <- plot_q13_by_group(data, "income_group", "收入水平")
+
+# 按性别分组
+q13_by_gender <- plot_q13_by_group(data, "gender", "性别", q13_cols, q13_titles_map)
+print(q13_by_gender)
+
+# 按年龄分组（青年组/中年组/银发组）
+q13_by_age <- plot_q13_by_group(data, "age_group_3", "年龄段", q13_cols, q13_titles_map)
+print(q13_by_age)
+
+# 按教育程度分组
+q13_by_edu <- plot_q13_by_group(data, "edu_group", "教育程度", q13_cols, q13_titles_map)
+print(q13_by_edu)
+
+# 按收入分组
+q13_by_income <- plot_q13_by_group(data, "income_group", "收入水平", q13_cols, q13_titles_map)
 print(q13_by_income)
 
 # 按是否使用APP分组
-data <- data %>%
-  mutate(
-    app_user = ifelse(q1_used_app == 1, "APP用户", "非APP用户")
-  )
-q13_by_app <- plot_q13_by_group(data, "app_user", "是否使用APP")
+q13_by_app <- plot_q13_by_group(data, "app_user", "是否使用APP", q13_cols, q13_titles_map)
 print(q13_by_app)
 
 # 分面图：各群体对比（更紧凑的展示方式）
-plot_q13_facet <- function(data, group_var, group_label) {
+plot_q13_facet <- function(data, group_var, group_label, q13_cols, q13_titles_map) {
   plot_data <- data %>%
     select(all_of(c(group_var, q13_cols))) %>%
+    mutate(across(all_of(q13_cols), as.numeric)) %>%
     rename(group = !!sym(group_var)) %>%
     filter(!is.na(group)) %>%
     pivot_longer(
@@ -759,14 +776,19 @@ plot_q13_facet <- function(data, group_var, group_label) {
       names_to = "Variable",
       values_to = "Value"
     ) %>%
-    mutate(Value = as.numeric(Value)) %>%
-    filter(Value == 1) %>%
+    filter(!is.na(Value) & Value == 1) %>%
     group_by(group, Variable) %>%
     summarise(Count = n(), .groups = 'drop') %>%
+    # 计算各群体内各选项占所有选项的比例
     group_by(group) %>%
     mutate(Pct = Count / sum(Count) * 100) %>%
     ungroup() %>%
     mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
+
+  if (nrow(plot_data) == 0) {
+    message("警告: 无数据可绑图")
+    return(NULL)
+  }
 
   p <- ggplot(plot_data, aes(x = Option, y = Pct, fill = Option)) +
     geom_bar(stat = "identity") +
@@ -783,19 +805,19 @@ plot_q13_facet <- function(data, group_var, group_label) {
       legend.position = "none",
       strip.text = element_text(face = "bold")
     ) +
-    scale_y_continuous(limits = c(0, max(plot_data$Pct) * 1.2))
+    scale_y_continuous(limits = c(0, max(plot_data$Pct, na.rm = TRUE) * 1.2))
 
   return(p)
 }
 
 # 分面图展示
-q13_facet_gender <- plot_q13_facet(data, "gender", "性别")
+q13_facet_gender <- plot_q13_facet(data, "gender", "性别", q13_cols, q13_titles_map)
 print(q13_facet_gender)
 
-q13_facet_age <- plot_q13_facet(data, "age_group_3", "年龄段")
+q13_facet_age <- plot_q13_facet(data, "age_group_3", "年龄段", q13_cols, q13_titles_map)
 print(q13_facet_age)
 
-q13_facet_app <- plot_q13_facet(data, "app_user", "是否使用APP")
+q13_facet_app <- plot_q13_facet(data, "app_user", "是否使用APP", q13_cols, q13_titles_map)
 print(q13_facet_app)
 
 ## Q20 ----
