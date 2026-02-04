@@ -645,6 +645,159 @@ q13_heatmap <- ggplot(q13_heatmap_data,
 
 print(q13_heatmap)
 
+## Q13 分群体分析 ----
+# 通用函数：按群体绘制Q13条形图
+plot_q13_by_group <- function(data, group_var, group_label) {
+  # 准备数据
+  plot_data <- data %>%
+    select(all_of(c(group_var, q13_cols))) %>%
+    rename(group = !!sym(group_var)) %>%
+    filter(!is.na(group)) %>%
+    pivot_longer(
+      cols = all_of(q13_cols),
+      names_to = "Variable",
+      values_to = "Value"
+    ) %>%
+    mutate(Value = as.numeric(Value)) %>%
+    filter(Value == 1) %>%
+    group_by(group, Variable) %>%
+    summarise(Count = n(), .groups = 'drop') %>%
+    # 计算各群体内的百分比
+    group_by(group) %>%
+    mutate(
+      Total = sum(Count),
+      Pct = Count / sum(Count) * 100
+    ) %>%
+    ungroup() %>%
+    mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
+
+  # 绘制分面条形图（按百分比）
+  p <- ggplot(plot_data, aes(x = reorder(Option, Pct), y = Pct, fill = group)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = paste0(round(Pct, 1), "%")),
+              position = position_dodge(width = 0.9),
+              hjust = -0.1, size = 2.5) +
+    coord_flip() +
+    labs(
+      title = paste0("Q13: 最能吸引您使用的功能 (按", group_label, "分组)"),
+      subtitle = "各群体内选择该选项的比例",
+      x = "吸引因素",
+      y = "选择比例 (%)",
+      fill = group_label
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "bottom"
+    ) +
+    scale_y_continuous(limits = c(0, max(plot_data$Pct) * 1.15))
+
+  return(p)
+}
+
+# 按性别分组
+q13_by_gender <- plot_q13_by_group(data, "gender", "性别")
+print(q13_by_gender)
+
+# 按年龄分组（使用3分组）
+data <- data %>%
+  mutate(
+    age_group_3 = case_when(
+      age %in% c("18-25岁", "26-35岁") ~ "青年(18-35)",
+      age %in% c("36-45岁", "46-55岁") ~ "中年(36-55)",
+      age %in% c("56-65岁", "65岁以上") ~ "老年(56+)",
+      TRUE ~ NA_character_
+    )
+  )
+q13_by_age <- plot_q13_by_group(data, "age_group_3", "年龄段")
+print(q13_by_age)
+
+# 按教育程度分组
+data <- data %>%
+  mutate(
+    edu_group = case_when(
+      education %in% c("初中及以下", "高中/中专/技校") ~ "高中及以下",
+      education == "大专" ~ "大专",
+      education == "本科" ~ "本科",
+      education %in% c("硕士", "博士") ~ "研究生",
+      TRUE ~ NA_character_
+    )
+  )
+q13_by_edu <- plot_q13_by_group(data, "edu_group", "教育程度")
+print(q13_by_edu)
+
+# 按收入分组
+data <- data %>%
+  mutate(
+    income_group = case_when(
+      monthly_income_personal %in% c("3000元以下", "3001-5000元") ~ "低收入(<5000)",
+      monthly_income_personal %in% c("5001-8000元", "8001-12000元") ~ "中收入(5000-12000)",
+      monthly_income_personal %in% c("12001-20000元", "20001-30000元", "30000元以上") ~ "高收入(>12000)",
+      TRUE ~ NA_character_
+    )
+  )
+q13_by_income <- plot_q13_by_group(data, "income_group", "收入水平")
+print(q13_by_income)
+
+# 按是否使用APP分组
+data <- data %>%
+  mutate(
+    app_user = ifelse(q1_used_app == 1, "APP用户", "非APP用户")
+  )
+q13_by_app <- plot_q13_by_group(data, "app_user", "是否使用APP")
+print(q13_by_app)
+
+# 分面图：各群体对比（更紧凑的展示方式）
+plot_q13_facet <- function(data, group_var, group_label) {
+  plot_data <- data %>%
+    select(all_of(c(group_var, q13_cols))) %>%
+    rename(group = !!sym(group_var)) %>%
+    filter(!is.na(group)) %>%
+    pivot_longer(
+      cols = all_of(q13_cols),
+      names_to = "Variable",
+      values_to = "Value"
+    ) %>%
+    mutate(Value = as.numeric(Value)) %>%
+    filter(Value == 1) %>%
+    group_by(group, Variable) %>%
+    summarise(Count = n(), .groups = 'drop') %>%
+    group_by(group) %>%
+    mutate(Pct = Count / sum(Count) * 100) %>%
+    ungroup() %>%
+    mutate(Option = factor(q13_titles_map[Variable], levels = q13_titles_map))
+
+  p <- ggplot(plot_data, aes(x = Option, y = Pct, fill = Option)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(round(Pct, 0), "%")), vjust = -0.3, size = 2.5) +
+    facet_wrap(~ group, ncol = 2) +
+    labs(
+      title = paste0("Q13: 最能吸引您使用的功能 (按", group_label, "分面)"),
+      x = NULL, y = "选择比例 (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+      legend.position = "none",
+      strip.text = element_text(face = "bold")
+    ) +
+    scale_y_continuous(limits = c(0, max(plot_data$Pct) * 1.2))
+
+  return(p)
+}
+
+# 分面图展示
+q13_facet_gender <- plot_q13_facet(data, "gender", "性别")
+print(q13_facet_gender)
+
+q13_facet_age <- plot_q13_facet(data, "age_group_3", "年龄段")
+print(q13_facet_age)
+
+q13_facet_app <- plot_q13_facet(data, "app_user", "是否使用APP")
+print(q13_facet_app)
+
 ## Q20 ----
 # Q20 标题映射
 q20_titles <- c(
@@ -4151,4 +4304,399 @@ co_heatmap <- ggplot(co_long, aes(x = 行为1, y = 行为2, fill = 共现人数)
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
 print(co_heatmap)
+
+# ============================================================
+# 综合行为得分回归分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("综合行为得分回归分析\n")
+cat("========================================\n")
+
+# 定义行为分类
+# APP可见行为（可在APP中追踪）：公共交通、骑行/步行
+# APP不可见行为（无法在APP中追踪）：关闭电源、垃圾分类、环保袋、节能电器
+
+reg_combined <- reg_base %>%
+  mutate(
+    # 各行为前后差值
+    diff_public_trans = as.numeric(q18_change_public_trans) - as.numeric(q16_pre_public_trans),
+    diff_bike_walk = as.numeric(q18_change_bike_walk) - as.numeric(q16_pre_bike_walk),
+    diff_turn_off_power = as.numeric(q18_change_turn_off_power) - as.numeric(q16_pre_turn_off_power),
+    diff_garbage_sort = as.numeric(q18_change_garbage_sort) - as.numeric(q16_pre_garbage_sort),
+    diff_reusable_bag = as.numeric(q18_change_reusable_bag) - as.numeric(q16_pre_reusable_bag),
+    diff_energy_eff = as.numeric(q18_change_choose_energy_eff) - as.numeric(q16_pre_choose_energy_eff),
+
+    # 各行为使用前得分
+    pre_public_trans = as.numeric(q16_pre_public_trans),
+    pre_bike_walk = as.numeric(q16_pre_bike_walk),
+    pre_turn_off_power = as.numeric(q16_pre_turn_off_power),
+    pre_garbage_sort = as.numeric(q16_pre_garbage_sort),
+    pre_reusable_bag = as.numeric(q16_pre_reusable_bag),
+    pre_energy_eff = as.numeric(q16_pre_choose_energy_eff),
+
+    # 因变量1：全部行为综合差值
+    total_diff = diff_public_trans + diff_bike_walk + diff_turn_off_power +
+      diff_garbage_sort + diff_reusable_bag + diff_energy_eff,
+
+    # 因变量2：APP可见行为综合差值（公交+骑行）
+    visible_diff = diff_public_trans + diff_bike_walk,
+
+    # 因变量3：APP不可见行为综合差值
+    invisible_diff = diff_turn_off_power + diff_garbage_sort +
+      diff_reusable_bag + diff_energy_eff,
+
+    # 使用前总分
+    total_pre = pre_public_trans + pre_bike_walk + pre_turn_off_power +
+      pre_garbage_sort + pre_reusable_bag + pre_energy_eff,
+    visible_pre = pre_public_trans + pre_bike_walk,
+    invisible_pre = pre_turn_off_power + pre_garbage_sort + pre_reusable_bag + pre_energy_eff,
+
+    # 因变量4：百分比变化（相对于使用前得分）
+    total_pct_change = ifelse(total_pre > 0, total_diff / total_pre * 100, NA),
+    visible_pct_change = ifelse(visible_pre > 0, visible_diff / visible_pre * 100, NA),
+    invisible_pct_change = ifelse(invisible_pre > 0, invisible_diff / invisible_pre * 100, NA),
+
+    # 因变量5：是否有改善（二分变量）
+    total_improved = as.integer(total_diff > 0),
+    visible_improved = as.integer(visible_diff > 0),
+    invisible_improved = as.integer(invisible_diff > 0),
+
+    # 因变量6：分级变量（无变化/轻微改善/中等改善/显著改善）
+    # 基于总差值分布的四分位数划分
+    total_level = case_when(
+      total_diff <= 0 ~ 0,      # 无改善或下降
+      total_diff <= 2 ~ 1,      # 轻微改善 (1-2分)
+      total_diff <= 4 ~ 2,      # 中等改善 (3-4分)
+      TRUE ~ 3                   # 显著改善 (>4分)
+    ),
+    visible_level = case_when(
+      visible_diff <= 0 ~ 0,
+      visible_diff == 1 ~ 1,
+      TRUE ~ 2
+    ),
+    invisible_level = case_when(
+      invisible_diff <= 0 ~ 0,
+      invisible_diff <= 2 ~ 1,
+      invisible_diff <= 3 ~ 2,
+      TRUE ~ 3
+    )
+  )
+
+# ============================================================
+# 模型F：全部行为综合得分 - 仅社会经济因素
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型F：全部行为综合得分 - 仅社会经济因素\n")
+cat("========================================\n")
+
+reg_data_f <- reg_combined %>%
+  select(total_diff, all_of(pred_demo)) %>%
+  na.omit()
+
+model_f <- lm(total_diff ~ ., data = reg_data_f)
+cat("\n样本量:", nrow(reg_data_f), "\n")
+print(summary(model_f))
+
+# ============================================================
+# 模型G：全部行为综合得分 - 仅APP相关变量
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型G：全部行为综合得分 - 仅APP相关变量\n")
+cat("========================================\n")
+
+reg_data_g <- reg_combined %>%
+  select(total_diff, all_of(pred_app)) %>%
+  na.omit()
+
+model_g <- lm(total_diff ~ ., data = reg_data_g)
+cat("\n样本量:", nrow(reg_data_g), "\n")
+print(summary(model_g))
+
+# ============================================================
+# 模型H：APP可见行为综合得分 - 仅社会经济因素
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型H：APP可见行为（公交+骑行）- 仅社会经济因素\n")
+cat("========================================\n")
+
+reg_data_h <- reg_combined %>%
+  select(visible_diff, all_of(pred_demo)) %>%
+  na.omit()
+
+model_h <- lm(visible_diff ~ ., data = reg_data_h)
+cat("\n样本量:", nrow(reg_data_h), "\n")
+print(summary(model_h))
+
+# ============================================================
+# 模型I：APP可见行为综合得分 - 仅APP相关变量
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型I：APP可见行为（公交+骑行）- 仅APP相关变量\n")
+cat("========================================\n")
+
+reg_data_i <- reg_combined %>%
+  select(visible_diff, all_of(pred_app)) %>%
+  na.omit()
+
+model_i <- lm(visible_diff ~ ., data = reg_data_i)
+cat("\n样本量:", nrow(reg_data_i), "\n")
+print(summary(model_i))
+
+# ============================================================
+# 模型J：APP不可见行为综合得分 - 仅社会经济因素
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型J：APP不可见行为（关闭电源+垃圾分类+环保袋+节能电器）- 仅社会经济因素\n")
+cat("========================================\n")
+
+reg_data_j <- reg_combined %>%
+  select(invisible_diff, all_of(pred_demo)) %>%
+  na.omit()
+
+model_j <- lm(invisible_diff ~ ., data = reg_data_j)
+cat("\n样本量:", nrow(reg_data_j), "\n")
+print(summary(model_j))
+
+# ============================================================
+# 模型K：APP不可见行为综合得分 - 仅APP相关变量
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型K：APP不可见行为（关闭电源+垃圾分类+环保袋+节能电器）- 仅APP相关变量\n")
+cat("========================================\n")
+
+reg_data_k <- reg_combined %>%
+  select(invisible_diff, all_of(pred_app)) %>%
+  na.omit()
+
+model_k <- lm(invisible_diff ~ ., data = reg_data_k)
+cat("\n样本量:", nrow(reg_data_k), "\n")
+print(summary(model_k))
+
+# ============================================================
+# 模型L：百分比变化 - 全部行为
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型L：百分比变化作为因变量 - 全部行为\n")
+cat("========================================\n")
+
+# 社会经济因素
+reg_data_l1 <- reg_combined %>%
+  select(total_pct_change, all_of(pred_demo)) %>%
+  na.omit() %>%
+  filter(is.finite(total_pct_change))
+
+cat("\n--- L1: 社会经济因素 ---\n")
+cat("样本量:", nrow(reg_data_l1), "\n")
+model_l1 <- lm(total_pct_change ~ ., data = reg_data_l1)
+print(summary(model_l1))
+
+# APP相关变量
+reg_data_l2 <- reg_combined %>%
+  select(total_pct_change, all_of(pred_app)) %>%
+  na.omit() %>%
+  filter(is.finite(total_pct_change))
+
+cat("\n--- L2: APP相关变量 ---\n")
+cat("样本量:", nrow(reg_data_l2), "\n")
+model_l2 <- lm(total_pct_change ~ ., data = reg_data_l2)
+print(summary(model_l2))
+
+# ============================================================
+# 模型M：Logistic回归 - 是否有改善（综合得分）
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型M：Logistic回归 - 综合得分是否改善\n")
+cat("========================================\n")
+
+# M1: 全部行为 - 社会经济因素
+reg_data_m1 <- reg_combined %>%
+  select(total_improved, all_of(pred_demo)) %>%
+  na.omit()
+
+cat("\n--- M1: 全部行为是否改善 - 社会经济因素 ---\n")
+cat("改善人数:", sum(reg_data_m1$total_improved), "/", nrow(reg_data_m1),
+    "(", round(mean(reg_data_m1$total_improved) * 100, 1), "%)\n")
+model_m1 <- glm(total_improved ~ ., data = reg_data_m1, family = binomial)
+print(summary(model_m1))
+
+# M2: 全部行为 - APP相关变量
+reg_data_m2 <- reg_combined %>%
+  select(total_improved, all_of(pred_app)) %>%
+  na.omit()
+
+cat("\n--- M2: 全部行为是否改善 - APP相关变量 ---\n")
+cat("改善人数:", sum(reg_data_m2$total_improved), "/", nrow(reg_data_m2),
+    "(", round(mean(reg_data_m2$total_improved) * 100, 1), "%)\n")
+model_m2 <- glm(total_improved ~ ., data = reg_data_m2, family = binomial)
+print(summary(model_m2))
+
+# M3: APP可见行为 - 社会经济因素
+reg_data_m3 <- reg_combined %>%
+  select(visible_improved, all_of(pred_demo)) %>%
+  na.omit()
+
+cat("\n--- M3: APP可见行为是否改善 - 社会经济因素 ---\n")
+cat("改善人数:", sum(reg_data_m3$visible_improved), "/", nrow(reg_data_m3),
+    "(", round(mean(reg_data_m3$visible_improved) * 100, 1), "%)\n")
+model_m3 <- glm(visible_improved ~ ., data = reg_data_m3, family = binomial)
+print(summary(model_m3))
+
+# M4: APP可见行为 - APP相关变量
+reg_data_m4 <- reg_combined %>%
+  select(visible_improved, all_of(pred_app)) %>%
+  na.omit()
+
+cat("\n--- M4: APP可见行为是否改善 - APP相关变量 ---\n")
+cat("改善人数:", sum(reg_data_m4$visible_improved), "/", nrow(reg_data_m4),
+    "(", round(mean(reg_data_m4$visible_improved) * 100, 1), "%)\n")
+model_m4 <- glm(visible_improved ~ ., data = reg_data_m4, family = binomial)
+print(summary(model_m4))
+
+# M5: APP不可见行为 - 社会经济因素
+reg_data_m5 <- reg_combined %>%
+  select(invisible_improved, all_of(pred_demo)) %>%
+  na.omit()
+
+cat("\n--- M5: APP不可见行为是否改善 - 社会经济因素 ---\n")
+cat("改善人数:", sum(reg_data_m5$invisible_improved), "/", nrow(reg_data_m5),
+    "(", round(mean(reg_data_m5$invisible_improved) * 100, 1), "%)\n")
+model_m5 <- glm(invisible_improved ~ ., data = reg_data_m5, family = binomial)
+print(summary(model_m5))
+
+# M6: APP不可见行为 - APP相关变量
+reg_data_m6 <- reg_combined %>%
+  select(invisible_improved, all_of(pred_app)) %>%
+  na.omit()
+
+cat("\n--- M6: APP不可见行为是否改善 - APP相关变量 ---\n")
+cat("改善人数:", sum(reg_data_m6$invisible_improved), "/", nrow(reg_data_m6),
+    "(", round(mean(reg_data_m6$invisible_improved) * 100, 1), "%)\n")
+model_m6 <- glm(invisible_improved ~ ., data = reg_data_m6, family = binomial)
+print(summary(model_m6))
+
+# ============================================================
+# 模型N：有序Logistic回归 - 分级改善程度
+# ============================================================
+cat("\n\n========================================\n")
+cat("模型N：有序Logistic回归 - 分级改善程度\n")
+cat("========================================\n")
+
+# 检查是否有MASS包
+if (requireNamespace("MASS", quietly = TRUE)) {
+
+  # N1: 全部行为分级 - 社会经济因素
+  reg_data_n1 <- reg_combined %>%
+    mutate(total_level = factor(total_level, ordered = TRUE)) %>%
+    select(total_level, all_of(pred_demo)) %>%
+    na.omit()
+
+  cat("\n--- N1: 全部行为分级改善 - 社会经济因素 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n1$total_level))
+  model_n1 <- MASS::polr(total_level ~ ., data = reg_data_n1, Hess = TRUE)
+  print(summary(model_n1))
+
+  # N2: 全部行为分级 - APP相关变量
+  reg_data_n2 <- reg_combined %>%
+    mutate(total_level = factor(total_level, ordered = TRUE)) %>%
+    select(total_level, all_of(pred_app)) %>%
+    na.omit()
+
+  cat("\n--- N2: 全部行为分级改善 - APP相关变量 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n2$total_level))
+  model_n2 <- MASS::polr(total_level ~ ., data = reg_data_n2, Hess = TRUE)
+  print(summary(model_n2))
+
+  # N3: APP可见行为分级 - 社会经济因素
+  reg_data_n3 <- reg_combined %>%
+    mutate(visible_level = factor(visible_level, ordered = TRUE)) %>%
+    select(visible_level, all_of(pred_demo)) %>%
+    na.omit()
+
+  cat("\n--- N3: APP可见行为分级改善 - 社会经济因素 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n3$visible_level))
+  model_n3 <- MASS::polr(visible_level ~ ., data = reg_data_n3, Hess = TRUE)
+  print(summary(model_n3))
+
+  # N4: APP可见行为分级 - APP相关变量
+  reg_data_n4 <- reg_combined %>%
+    mutate(visible_level = factor(visible_level, ordered = TRUE)) %>%
+    select(visible_level, all_of(pred_app)) %>%
+    na.omit()
+
+  cat("\n--- N4: APP可见行为分级改善 - APP相关变量 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n4$visible_level))
+  model_n4 <- MASS::polr(visible_level ~ ., data = reg_data_n4, Hess = TRUE)
+  print(summary(model_n4))
+
+  # N5: APP不可见行为分级 - 社会经济因素
+  reg_data_n5 <- reg_combined %>%
+    mutate(invisible_level = factor(invisible_level, ordered = TRUE)) %>%
+    select(invisible_level, all_of(pred_demo)) %>%
+    na.omit()
+
+  cat("\n--- N5: APP不可见行为分级改善 - 社会经济因素 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n5$invisible_level))
+  model_n5 <- MASS::polr(invisible_level ~ ., data = reg_data_n5, Hess = TRUE)
+  print(summary(model_n5))
+
+  # N6: APP不可见行为分级 - APP相关变量
+  reg_data_n6 <- reg_combined %>%
+    mutate(invisible_level = factor(invisible_level, ordered = TRUE)) %>%
+    select(invisible_level, all_of(pred_app)) %>%
+    na.omit()
+
+  cat("\n--- N6: APP不可见行为分级改善 - APP相关变量 ---\n")
+  cat("分级分布:\n")
+  print(table(reg_data_n6$invisible_level))
+  model_n6 <- MASS::polr(invisible_level ~ ., data = reg_data_n6, Hess = TRUE)
+  print(summary(model_n6))
+
+} else {
+  cat("需要安装MASS包来运行有序Logistic回归: install.packages('MASS')\n")
+}
+
+# ============================================================
+# 综合得分回归模型汇总表
+# ============================================================
+cat("\n\n========================================\n")
+cat("综合得分回归模型汇总\n")
+cat("========================================\n")
+
+# 线性回归模型汇总
+linear_summary <- data.frame(
+  模型 = c("F", "G", "H", "I", "J", "K"),
+  因变量 = c("全部行为综合差值", "全部行为综合差值",
+             "APP可见行为差值", "APP可见行为差值",
+             "APP不可见行为差值", "APP不可见行为差值"),
+  自变量类型 = c("社会经济", "APP相关", "社会经济", "APP相关", "社会经济", "APP相关"),
+  样本量 = c(nrow(reg_data_f), nrow(reg_data_g), nrow(reg_data_h),
+            nrow(reg_data_i), nrow(reg_data_j), nrow(reg_data_k)),
+  R方 = c(summary(model_f)$r.squared, summary(model_g)$r.squared,
+         summary(model_h)$r.squared, summary(model_i)$r.squared,
+         summary(model_j)$r.squared, summary(model_k)$r.squared),
+  调整R方 = c(summary(model_f)$adj.r.squared, summary(model_g)$adj.r.squared,
+             summary(model_h)$adj.r.squared, summary(model_i)$adj.r.squared,
+             summary(model_j)$adj.r.squared, summary(model_k)$adj.r.squared)
+)
+
+cat("\n--- 线性回归模型拟合指标 ---\n")
+print(knitr::kable(linear_summary, digits = 4, format = "simple"))
+
+cat("\n--- 综合分析结论 ---\n")
+cat("1. 行为分类：\n")
+cat("   - APP可见行为：公共交通、骑行/步行（可在APP中追踪记录）\n")
+cat("   - APP不可见行为：关闭电源、垃圾分类、环保袋、节能电器（无法在APP中追踪）\n")
+cat("2. 因变量构建方式：\n")
+cat("   - 原始差值：使用后得分 - 使用前得分的总和\n")
+cat("   - 百分比变化：差值/使用前得分 × 100\n")
+cat("   - 是否改善：差值>0为1，否则为0（二分变量）\n")
+cat("   - 分级改善：无改善(0)/轻微(1)/中等(2)/显著(3)\n")
+cat("3. 自变量组合：\n")
+cat("   - 社会经济因素：性别、年龄、教育、个人收入、家庭收入\n")
+cat("   - APP相关变量：使用频率、界面简洁、平台打通、自动记录、清晰引导、提高意识、信息实用、更快选择、了解碳普惠\n")
 
