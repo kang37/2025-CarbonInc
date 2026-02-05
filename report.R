@@ -2814,7 +2814,7 @@ data <- data %>%
     monthly_income_char = as.character(monthly_income_family),
     
     # 使用 case_when 创建新分组
-    income_group_3 = case_when(
+    income_group = case_when(
       monthly_income_char %in% c("1", "2", "3") ~ "低收入组 (1-3档)",
       monthly_income_char %in% c("4", "5")      ~ "中收入组 (4-5档)",
       monthly_income_char %in% c("6", "7")      ~ "高收入组 (6-7档)",
@@ -2823,7 +2823,7 @@ data <- data %>%
   ) %>%
   # 将其转换为有序因子，确保绘图顺序正确 (低 -> 中 -> 高)
   mutate(
-    income_group_3 = factor(
+    income_group = factor(
       income_group_3, 
       levels = c("低收入组 (1-3档)", "中收入组 (4-5档)", "高收入组 (6-7档)")
     )
@@ -4721,4 +4721,519 @@ cat("   - 分级改善：无改善(0)/轻微(1)/中等(2)/显著(3)\n")
 cat("3. 自变量组合：\n")
 cat("   - 社会经济因素：性别、年龄、教育、个人收入、家庭收入\n")
 cat("   - APP相关变量：使用频率、界面简洁、平台打通、自动记录、清晰引导、提高意识、信息实用、更快选择、了解碳普惠\n")
+
+# ============================================================
+# 补充分析1：APP使用频率与行为改变关系 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("补充分析1：APP使用频率与行为改变关系\n")
+cat("========================================\n")
+
+# 准备数据：APP用户的使用频率和行为改变
+freq_behavior_data <- data %>%
+  filter(q1_used_app == 1) %>%
+  mutate(
+    app_freq = as.numeric(q10_app_freq),
+    # 各行为改变量
+    diff_public_trans = as.numeric(q18_change_public_trans) - as.numeric(q16_pre_public_trans),
+    diff_bike_walk = as.numeric(q18_change_bike_walk) - as.numeric(q16_pre_bike_walk),
+    diff_turn_off_power = as.numeric(q18_change_turn_off_power) - as.numeric(q16_pre_turn_off_power),
+    diff_garbage_sort = as.numeric(q18_change_garbage_sort) - as.numeric(q16_pre_garbage_sort),
+    diff_reusable_bag = as.numeric(q18_change_reusable_bag) - as.numeric(q16_pre_reusable_bag),
+    diff_energy_eff = as.numeric(q18_change_choose_energy_eff) - as.numeric(q16_pre_choose_energy_eff),
+    # 总改变量
+    total_diff = diff_public_trans + diff_bike_walk + diff_turn_off_power +
+      diff_garbage_sort + diff_reusable_bag + diff_energy_eff,
+    # 是否有改善
+    any_improved = as.integer(total_diff > 0),
+    # APP可见行为改变
+    visible_diff = diff_public_trans + diff_bike_walk,
+    # APP不可见行为改变
+    invisible_diff = diff_turn_off_power + diff_garbage_sort + diff_reusable_bag + diff_energy_eff
+  ) %>%
+  filter(!is.na(app_freq))
+
+# 1. 使用频率与各行为改变量的相关分析
+cat("\n--- 使用频率与行为改变量的Spearman相关 ---\n")
+freq_cor_vars <- c("diff_public_trans", "diff_bike_walk", "diff_turn_off_power",
+                   "diff_garbage_sort", "diff_reusable_bag", "diff_energy_eff",
+                   "total_diff", "visible_diff", "invisible_diff")
+freq_cor_labels <- c("公共交通", "骑行步行", "关闭电源", "垃圾分类",
+                     "环保袋", "节能电器", "总改变量", "可见行为", "不可见行为")
+
+freq_cor_results <- data.frame(
+  行为 = freq_cor_labels,
+  相关系数 = sapply(freq_cor_vars, function(v) {
+    cor(freq_behavior_data$app_freq, freq_behavior_data[[v]],
+        method = "spearman", use = "complete.obs")
+  }),
+  P值 = sapply(freq_cor_vars, function(v) {
+    test <- cor.test(freq_behavior_data$app_freq, freq_behavior_data[[v]],
+                     method = "spearman")
+    test$p.value
+  })
+)
+freq_cor_results$显著性 <- ifelse(freq_cor_results$P值 < 0.001, "***",
+                                  ifelse(freq_cor_results$P值 < 0.01, "**",
+                                         ifelse(freq_cor_results$P值 < 0.05, "*", "")))
+print(knitr::kable(freq_cor_results, digits = 4, format = "simple"))
+
+# 2. 按使用频率分组比较行为改变
+freq_behavior_data <- freq_behavior_data %>%
+  mutate(
+    freq_group = case_when(
+      app_freq <= 2 ~ "低频(≤2次/月)",
+      app_freq <= 5 ~ "中频(3-5次/月)",
+      TRUE ~ "高频(>5次/月)"
+    ),
+    freq_group = factor(freq_group, levels = c("低频(≤2次/月)", "中频(3-5次/月)", "高频(>5次/月)"))
+  )
+
+cat("\n--- 不同使用频率组的行为改变对比 ---\n")
+freq_group_summary <- freq_behavior_data %>%
+  group_by(freq_group) %>%
+  summarise(
+    n = n(),
+    总改变量均值 = mean(total_diff, na.rm = TRUE),
+    可见行为均值 = mean(visible_diff, na.rm = TRUE),
+    不可见行为均值 = mean(invisible_diff, na.rm = TRUE),
+    改善比例 = mean(any_improved, na.rm = TRUE) * 100,
+    .groups = 'drop'
+  )
+print(knitr::kable(freq_group_summary, digits = 2, format = "simple"))
+
+# Kruskal-Wallis检验
+cat("\n--- Kruskal-Wallis检验：使用频率组间差异 ---\n")
+kw_total <- kruskal.test(total_diff ~ freq_group, data = freq_behavior_data)
+kw_visible <- kruskal.test(visible_diff ~ freq_group, data = freq_behavior_data)
+kw_invisible <- kruskal.test(invisible_diff ~ freq_group, data = freq_behavior_data)
+cat("总改变量: χ² =", round(kw_total$statistic, 2), ", p =", round(kw_total$p.value, 4), "\n")
+cat("可见行为: χ² =", round(kw_visible$statistic, 2), ", p =", round(kw_visible$p.value, 4), "\n")
+cat("不可见行为: χ² =", round(kw_invisible$statistic, 2), ", p =", round(kw_invisible$p.value, 4), "\n")
+
+# 绘图：使用频率与行为改变
+freq_change_plot <- ggplot(freq_behavior_data, aes(x = freq_group, y = total_diff, fill = freq_group)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, alpha = 0.3, size = 1) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "red") +
+  labs(
+    title = "APP使用频率与行为改变量",
+    x = "使用频率", y = "总行为改变量"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+print(freq_change_plot)
+
+# ============================================================
+# 补充分析2：婚姻状况的群体差异分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("补充分析2：婚姻状况的群体差异分析\n")
+cat("========================================\n")
+
+# 婚姻状况分组分析函数
+analyze_behavior_by_marital <- function(data, pre_col_str, post_col_str, behavior_label) {
+  pre_sym <- rlang::sym(pre_col_str)
+  post_sym <- rlang::sym(post_col_str)
+
+  analysis_data <- data %>%
+    filter(q1_used_app == 1) %>%
+    mutate(
+      Pre = as.numeric(!!pre_sym),
+      Post = as.numeric(!!post_sym),
+      Difference = Post - Pre
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post) & !is.na(marital_status))
+
+  # 组内检验
+  within_tests <- analysis_data %>%
+    group_by(marital_status) %>%
+    summarise(
+      N = n(),
+      Mean_Pre = mean(Pre, na.rm = TRUE),
+      Mean_Post = mean(Post, na.rm = TRUE),
+      Mean_Difference = mean(Difference, na.rm = TRUE),
+      p = wilcox.test(Post, Pre, paired = TRUE)$p.value,
+      .groups = 'drop'
+    ) %>%
+    mutate(p_signif = ifelse(p < 0.001, "***", ifelse(p < 0.01, "**", ifelse(p < 0.05, "*", ""))))
+
+  # 组间检验
+  between_test <- kruskal.test(Difference ~ marital_status, data = analysis_data)
+
+  # 绑图
+  plot <- ggplot(analysis_data, aes(x = marital_status, y = Difference, fill = marital_status)) +
+    geom_boxplot() +
+    stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "red") +
+    labs(title = behavior_label, x = NULL, y = "行为改变量") +
+    theme_minimal() +
+    theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+  list(
+    label = behavior_label,
+    within_tests = within_tests,
+    between_p = between_test$p.value,
+    plot = plot
+  )
+}
+
+# 执行婚姻状况分析
+marital_analysis_results <- lapply(names(behavior_map), function(b) {
+  cols <- behavior_map[[b]]
+  analyze_behavior_by_marital(data, cols[1], cols[2], b)
+})
+
+# 汇总表
+marital_within_results <- do.call(rbind, lapply(marital_analysis_results, function(res) {
+  res$within_tests$behavior <- res$label
+  res$within_tests
+}))
+
+cat("\n--- 婚姻状况×行为改变：组内配对检验 ---\n")
+marital_table <- marital_within_results %>%
+  select(行为 = behavior, 婚姻状况 = marital_status, N,
+         使用前均值 = Mean_Pre, 使用后均值 = Mean_Post,
+         均值差异 = Mean_Difference, P值 = p, 显著性 = p_signif)
+print(knitr::kable(marital_table, digits = 3, format = "simple"))
+
+# 组间检验结果
+cat("\n--- 婚姻状况组间差异检验（Kruskal-Wallis）---\n")
+marital_between <- data.frame(
+  行为 = sapply(marital_analysis_results, `[[`, "label"),
+  组间P值 = sapply(marital_analysis_results, `[[`, "between_p")
+)
+marital_between$显著性 <- ifelse(marital_between$组间P值 < 0.001, "***",
+                                 ifelse(marital_between$组间P值 < 0.01, "**",
+                                        ifelse(marital_between$组间P值 < 0.05, "*", "")))
+print(knitr::kable(marital_between, digits = 4, format = "simple"))
+
+# 合并绑图
+marital_combined_plot <- Reduce(`+`, lapply(marital_analysis_results, `[[`, "plot")) +
+  plot_layout(ncol = 3) +
+  plot_annotation(title = "婚姻状况与行为改变")
+print(marital_combined_plot)
+
+# ============================================================
+# 补充分析3：Q4感知易用性和实用性描述性分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("补充分析3：Q4感知易用性和实用性分析\n")
+cat("========================================\n")
+
+# 定义Q4变量分组
+q4_usability <- c("q4_ui_simple", "q4_integrate_platform", "q4_auto_record")  # 感知易用性 1-3题
+q4_usefulness <- c("q4_clear_guidance", "q4_raise_awareness",
+                   "q4_info_feedback_useful", "q4_quicker_green_choice")  # 实用性 4-7题
+q4_carbon_credit <- "q4_know_carbon_credit"  # 第8题
+
+q4_labels <- c(
+  "q4_ui_simple" = "1.界面简洁明了",
+  "q4_integrate_platform" = "2.与常用平台打通",
+  "q4_auto_record" = "3.自动记录数据",
+  "q4_clear_guidance" = "4.清晰引导参与",
+  "q4_raise_awareness" = "5.提高低碳意识",
+  "q4_info_feedback_useful" = "6.信息反馈实用",
+  "q4_quicker_green_choice" = "7.更快做出环保选择",
+  "q4_know_carbon_credit" = "8.了解碳普惠机制"
+)
+
+# 描述性统计
+q4_all <- c(q4_usability, q4_usefulness, q4_carbon_credit)
+q4_summary <- data %>%
+  filter(q1_used_app == 1) %>%
+  select(all_of(q4_all)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Score") %>%
+  filter(!is.na(Score)) %>%
+  group_by(Variable) %>%
+  summarise(
+    N = n(),
+    均值 = mean(Score),
+    标准差 = sd(Score),
+    中位数 = median(Score),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    题目 = q4_labels[Variable],
+    类型 = case_when(
+      Variable %in% q4_usability ~ "感知易用性",
+      Variable %in% q4_usefulness ~ "实用性",
+      TRUE ~ "碳普惠认知"
+    )
+  ) %>%
+  select(类型, 题目, N, 均值, 标准差, 中位数) %>%
+  arrange(类型, 题目)
+
+cat("\n--- Q4各题描述性统计 ---\n")
+print(knitr::kable(q4_summary, digits = 2, format = "simple"))
+
+# 按类型汇总
+q4_type_summary <- data %>%
+  filter(q1_used_app == 1) %>%
+  mutate(
+    感知易用性 = rowMeans(across(all_of(q4_usability), as.numeric), na.rm = TRUE),
+    实用性 = rowMeans(across(all_of(q4_usefulness), as.numeric), na.rm = TRUE)
+  ) %>%
+  summarise(
+    感知易用性均值 = mean(感知易用性, na.rm = TRUE),
+    感知易用性SD = sd(感知易用性, na.rm = TRUE),
+    实用性均值 = mean(实用性, na.rm = TRUE),
+    实用性SD = sd(实用性, na.rm = TRUE)
+  )
+cat("\n--- 感知易用性和实用性汇总 ---\n")
+print(q4_type_summary)
+
+# 绘制Q4各题得分分布
+q4_plot_data <- data %>%
+  filter(q1_used_app == 1) %>%
+  select(all_of(q4_all)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Score") %>%
+  filter(!is.na(Score)) %>%
+  mutate(
+    题目 = factor(q4_labels[Variable], levels = q4_labels),
+    类型 = case_when(
+      Variable %in% q4_usability ~ "感知易用性",
+      Variable %in% q4_usefulness ~ "实用性",
+      TRUE ~ "碳普惠认知"
+    )
+  )
+
+q4_bar_plot <- ggplot(q4_plot_data, aes(x = 题目, y = Score, fill = 类型)) +
+  stat_summary(fun = mean, geom = "bar") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+  coord_flip() +
+  labs(title = "Q4: APP感知评价", x = NULL, y = "得分均值") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+print(q4_bar_plot)
+
+# ============================================================
+# 补充分析4：Q14奖励偏好的群体差异分析 ----
+# ============================================================
+cat("\n\n========================================\n")
+cat("补充分析4：Q14奖励偏好的群体差异分析\n")
+cat("========================================\n")
+
+# Q14奖励偏好按群体分析
+q14_data <- data %>%
+  filter(!is.na(q14_desired_reward)) %>%
+  mutate(reward = as.character(q14_desired_reward))
+
+# 总体分布
+cat("\n--- Q14奖励偏好总体分布 ---\n")
+q14_overall <- q14_data %>%
+  count(reward, name = "人数") %>%
+  mutate(比例 = round(人数 / sum(人数) * 100, 1)) %>%
+  arrange(desc(人数))
+print(knitr::kable(q14_overall, format = "simple"))
+
+# 按性别分析
+cat("\n--- Q14奖励偏好×性别 ---\n")
+q14_by_gender <- q14_data %>%
+  filter(!is.na(gender)) %>%
+  count(gender, reward) %>%
+  group_by(gender) %>%
+  mutate(比例 = round(n / sum(n) * 100, 1)) %>%
+  select(-n) %>%
+  pivot_wider(names_from = gender, values_from = 比例, values_fill = 0)
+print(knitr::kable(q14_by_gender, format = "simple"))
+
+# 卡方检验
+q14_gender_table <- table(q14_data$gender, q14_data$reward)
+q14_gender_chi <- chisq.test(q14_gender_table)
+cat("性别×奖励偏好卡方检验: χ² =", round(q14_gender_chi$statistic, 2),
+    ", p =", round(q14_gender_chi$p.value, 4), "\n")
+
+# 按年龄分析
+cat("\n--- Q14奖励偏好×年龄 ---\n")
+q14_by_age <- q14_data %>%
+  filter(!is.na(age_group_3)) %>%
+  count(age_group_3, reward) %>%
+  group_by(age_group_3) %>%
+  mutate(比例 = round(n / sum(n) * 100, 1)) %>%
+  select(-n) %>%
+  pivot_wider(names_from = age_group_3, values_from = 比例, values_fill = 0)
+print(knitr::kable(q14_by_age, format = "simple"))
+
+q14_age_table <- table(q14_data$age_group_3, q14_data$reward)
+q14_age_chi <- chisq.test(q14_age_table)
+cat("年龄×奖励偏好卡方检验: χ² =", round(q14_age_chi$statistic, 2),
+    ", p =", round(q14_age_chi$p.value, 4), "\n")
+
+# 按收入分析
+cat("\n--- Q14奖励偏好×收入 ---\n")
+q14_by_income <- q14_data %>%
+  filter(!is.na(income_group)) %>%
+  count(income_group, reward) %>%
+  group_by(income_group) %>%
+  mutate(比例 = round(n / sum(n) * 100, 1)) %>%
+  select(-n) %>%
+  pivot_wider(names_from = income_group, values_from = 比例, values_fill = 0)
+print(knitr::kable(q14_by_income, format = "simple"))
+
+q14_income_table <- table(q14_data$income_group, q14_data$reward)
+q14_income_chi <- chisq.test(q14_income_table)
+cat("收入×奖励偏好卡方检验: χ² =", round(q14_income_chi$statistic, 2),
+    ", p =", round(q14_income_chi$p.value, 4), "\n")
+
+# Q14按群体可视化
+q14_plot_data <- q14_data %>%
+  filter(!is.na(age_group_3)) %>%
+  count(age_group_3, reward) %>%
+  group_by(age_group_3) %>%
+  mutate(pct = n / sum(n) * 100)
+
+q14_age_plot <- ggplot(q14_plot_data, aes(x = reward, y = pct, fill = age_group_3)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  labs(title = "Q14: 奖励偏好按年龄分组", x = "奖励类型", y = "选择比例(%)", fill = "年龄组") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+print(q14_age_plot)
+
+# ============================================================
+# 补充分析5：场景追加分析（APP可见vs不可见行为）----
+# ============================================================
+cat("\n\n========================================\n")
+cat("补充分析5：场景追加分析\n")
+cat("========================================\n")
+
+# 目标：验证"APP可见行为的改变与APP设计因素相关，而不可见行为与APP设计无关"
+
+# 准备数据
+scene_data <- data %>%
+  filter(q1_used_app == 1) %>%
+  mutate(
+    # 各行为改变量
+    diff_public_trans = as.numeric(q18_change_public_trans) - as.numeric(q16_pre_public_trans),
+    diff_bike_walk = as.numeric(q18_change_bike_walk) - as.numeric(q16_pre_bike_walk),
+    diff_turn_off_power = as.numeric(q18_change_turn_off_power) - as.numeric(q16_pre_turn_off_power),
+    diff_garbage_sort = as.numeric(q18_change_garbage_sort) - as.numeric(q16_pre_garbage_sort),
+    diff_reusable_bag = as.numeric(q18_change_reusable_bag) - as.numeric(q16_pre_reusable_bag),
+    diff_energy_eff = as.numeric(q18_change_choose_energy_eff) - as.numeric(q16_pre_choose_energy_eff),
+    # APP可见行为（公交、骑行）
+    visible_diff = diff_public_trans + diff_bike_walk,
+    # APP不可见行为（关闭电源、垃圾分类、环保袋、节能电器）
+    invisible_diff = diff_turn_off_power + diff_garbage_sort + diff_reusable_bag + diff_energy_eff,
+    # APP设计因素（感知易用性和实用性）
+    app_design = rowMeans(cbind(
+      as.numeric(q4_ui_simple),
+      as.numeric(q4_integrate_platform),
+      as.numeric(q4_auto_record),
+      as.numeric(q4_clear_guidance),
+      as.numeric(q4_raise_awareness),
+      as.numeric(q4_info_feedback_useful),
+      as.numeric(q4_quicker_green_choice)
+    ), na.rm = TRUE),
+    # 使用频率
+    app_freq = as.numeric(q10_app_freq)
+  )
+
+# 1. APP设计因素与可见/不可见行为改变的相关性
+cat("\n--- APP设计因素与行为改变的相关性 ---\n")
+cor_visible <- cor.test(scene_data$app_design, scene_data$visible_diff,
+                        method = "spearman", use = "complete.obs")
+cor_invisible <- cor.test(scene_data$app_design, scene_data$invisible_diff,
+                          method = "spearman", use = "complete.obs")
+
+scene_cor_table <- data.frame(
+  行为类型 = c("APP可见行为（公交+骑行）", "APP不可见行为（其他4种）"),
+  相关系数 = c(cor_visible$estimate, cor_invisible$estimate),
+  P值 = c(cor_visible$p.value, cor_invisible$p.value)
+)
+scene_cor_table$显著性 <- ifelse(scene_cor_table$P值 < 0.001, "***",
+                                 ifelse(scene_cor_table$P值 < 0.01, "**",
+                                        ifelse(scene_cor_table$P值 < 0.05, "*", "")))
+print(knitr::kable(scene_cor_table, digits = 4, format = "simple"))
+
+# 2. 使用频率与可见/不可见行为改变的相关性
+cat("\n--- 使用频率与行为改变的相关性 ---\n")
+cor_freq_visible <- cor.test(scene_data$app_freq, scene_data$visible_diff,
+                             method = "spearman", use = "complete.obs")
+cor_freq_invisible <- cor.test(scene_data$app_freq, scene_data$invisible_diff,
+                               method = "spearman", use = "complete.obs")
+
+freq_cor_table <- data.frame(
+  行为类型 = c("APP可见行为", "APP不可见行为"),
+  相关系数 = c(cor_freq_visible$estimate, cor_freq_invisible$estimate),
+  P值 = c(cor_freq_visible$p.value, cor_freq_invisible$p.value)
+)
+freq_cor_table$显著性 <- ifelse(freq_cor_table$P值 < 0.001, "***",
+                                ifelse(freq_cor_table$P值 < 0.01, "**",
+                                       ifelse(freq_cor_table$P值 < 0.05, "*", "")))
+print(knitr::kable(freq_cor_table, digits = 4, format = "simple"))
+
+# 3. 回归分析：分别对可见和不可见行为建模
+cat("\n--- 回归分析：APP因素对可见行为的影响 ---\n")
+scene_reg_visible <- scene_data %>%
+  select(visible_diff, app_freq,
+         perc_ui = q4_ui_simple, perc_platform = q4_integrate_platform,
+         perc_auto = q4_auto_record, perc_guidance = q4_clear_guidance,
+         perc_awareness = q4_raise_awareness, perc_useful = q4_info_feedback_useful,
+         perc_quick = q4_quicker_green_choice) %>%
+  mutate(across(-visible_diff, as.numeric)) %>%
+  na.omit()
+
+model_visible <- lm(visible_diff ~ ., data = scene_reg_visible)
+cat("可见行为回归 R² =", round(summary(model_visible)$r.squared, 4),
+    ", 调整R² =", round(summary(model_visible)$adj.r.squared, 4), "\n")
+print(summary(model_visible))
+
+cat("\n--- 回归分析：APP因素对不可见行为的影响 ---\n")
+scene_reg_invisible <- scene_data %>%
+  select(invisible_diff, app_freq,
+         perc_ui = q4_ui_simple, perc_platform = q4_integrate_platform,
+         perc_auto = q4_auto_record, perc_guidance = q4_clear_guidance,
+         perc_awareness = q4_raise_awareness, perc_useful = q4_info_feedback_useful,
+         perc_quick = q4_quicker_green_choice) %>%
+  mutate(across(-invisible_diff, as.numeric)) %>%
+  na.omit()
+
+model_invisible <- lm(invisible_diff ~ ., data = scene_reg_invisible)
+cat("不可见行为回归 R² =", round(summary(model_invisible)$r.squared, 4),
+    ", 调整R² =", round(summary(model_invisible)$adj.r.squared, 4), "\n")
+print(summary(model_invisible))
+
+# 4. 对比两个模型的解释力
+cat("\n--- 模型解释力对比 ---\n")
+scene_model_compare <- data.frame(
+  行为类型 = c("APP可见行为", "APP不可见行为"),
+  R方 = c(summary(model_visible)$r.squared, summary(model_invisible)$r.squared),
+  调整R方 = c(summary(model_visible)$adj.r.squared, summary(model_invisible)$adj.r.squared),
+  F值 = c(summary(model_visible)$fstatistic[1], summary(model_invisible)$fstatistic[1]),
+  模型P值 = c(
+    pf(summary(model_visible)$fstatistic[1], summary(model_visible)$fstatistic[2],
+       summary(model_visible)$fstatistic[3], lower.tail = FALSE),
+    pf(summary(model_invisible)$fstatistic[1], summary(model_invisible)$fstatistic[2],
+       summary(model_invisible)$fstatistic[3], lower.tail = FALSE)
+  )
+)
+scene_model_compare$显著性 <- ifelse(scene_model_compare$模型P值 < 0.001, "***",
+                                     ifelse(scene_model_compare$模型P值 < 0.01, "**",
+                                            ifelse(scene_model_compare$模型P值 < 0.05, "*", "")))
+print(knitr::kable(scene_model_compare, digits = 4, format = "simple"))
+
+# 5. 提取显著的回归系数进行对比
+cat("\n--- 显著预测因子对比 ---\n")
+extract_sig_coefs <- function(model, label) {
+  coefs <- summary(model)$coefficients
+  sig_vars <- rownames(coefs)[coefs[, 4] < 0.05 & rownames(coefs) != "(Intercept)"]
+  if (length(sig_vars) == 0) return(data.frame(行为类型 = label, 显著变量 = "无"))
+  data.frame(
+    行为类型 = label,
+    显著变量 = sig_vars,
+    系数 = coefs[sig_vars, 1],
+    P值 = coefs[sig_vars, 4]
+  )
+}
+
+sig_visible <- extract_sig_coefs(model_visible, "APP可见行为")
+sig_invisible <- extract_sig_coefs(model_invisible, "APP不可见行为")
+sig_compare <- rbind(sig_visible, sig_invisible)
+print(knitr::kable(sig_compare, digits = 4, format = "simple"))
+
+cat("\n--- 场景追加分析结论 ---\n")
+cat("如果APP可见行为的R²显著高于不可见行为，且可见行为有更多显著的APP设计预测因子，\n")
+cat("则支持\"APP设计对行为改变有影响，应将更多场景纳入APP\"的观点。\n")
 
