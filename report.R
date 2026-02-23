@@ -6,6 +6,11 @@ library(patchwork)
 library(tidyr)
 library(showtext)
 library(ggsankey)
+library(knitr)
+library(kableExtra)
+library(rstatix)
+library(stringr)
+library(ggsignif) 
 showtext_auto()
 
 question_map <- c(
@@ -106,62 +111,6 @@ variables <- c(
 )
 
 # 重命名变量
-data <- 
-  read_excel(
-    "data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx"
-  ) %>% 
-  rename(!!!question_map) %>% 
-  mutate(across(all_of(variables), factor)) %>% 
-  mutate(
-    # 1. 性别 (假设 1=男, 2=女)
-    gender = recode_factor(gender,
-                           "1" = "男",
-                           "2" = "女",
-                           .default = "其他/未填" # .default 会处理 NA 或未在上面列出的值
-    ),
-    
-    # 2. 婚姻状况 (假设 1=未婚, 2=已婚, 3=...)
-    marital_status = recode_factor(marital_status,
-                                   "1" = "未婚",
-                                   "2" = "已婚",
-                                   "3" = "离异/丧偶",
-                                   .default = "其他/未填"
-    ),
-    
-    # 3. 汽车拥有量 (假设 0=0辆, 1=1辆, 2=2辆, 3=3辆及以上)
-    car_ownership = recode_factor(car_ownership,
-                                  "0" = "0辆",
-                                  "1" = "1辆",
-                                  "2" = "2辆",
-                                  "3" = "3辆及以上",
-                                  .default = "其他/未填"
-    ),
-    
-    # 4. 家庭同住人口 (假设 0=0人, 1=1人 ...)
-    family_other_pop = recode_factor(family_other_pop,
-                                     "0" = "0人",
-                                     "1" = "1人",
-                                     "2" = "2人",
-                                     "3" = "3人",
-                                     "4" = "4人及以上",
-                                     .default = "其他/未填"
-    ),
-    
-    # --- 对于已经是描述性文本的变量 (如 年龄段)，直接转为因子 ---
-    
-    age = factor(age),
-    education = factor(education),
-    housing_sqm = factor(housing_sqm),
-    monthly_income_personal = factor(monthly_income_personal),
-    monthly_income_family = factor(monthly_income_family),
-    residence_area = factor(residence_area)
-  ) %>% 
-  mutate(
-    age_group = factor(
-      ifelse(age == "6", "50岁以上", "50岁及以下"),
-      levels = c("50岁及以下", "50岁以上")
-    )
-  )
 
 # 基本情况饼图 ----
 # 定义对应的图表标题
@@ -172,7 +121,7 @@ titles <- c(
 )
 
 # 目标：保留最大比例的 N 个类别，其余合并为 "其他"
-N_KEEP <- 4
+N_KEEP <- 5
 
 # 函数：绘制单个饼图，将比例信息放入图例中
 create_pie_chart_academic <- function(data, variable_name_str, title, n_to_keep = N_KEEP) {
@@ -254,16 +203,13 @@ pie_charts_list_academic <- lapply(
   function(i) {
     var_name <- variables[i]
     plot_title <- titles[i]
-    # **使用新的函数**
     create_pie_chart_academic(data, var_name, plot_title, n_to_keep = N_KEEP) 
   }
 )
 
 # 组合图形
-# 确保已加载 patchwork 库
-# library(patchwork) 
 combined_plots_academic <- Reduce(`+`, pie_charts_list_academic)
-final_plot_academic <- combined_plots_academic + plot_layout(ncol = 3)
+final_plot_academic <- combined_plots_academic + plot_layout(ncol = 4)
 
 # 打印最终组合图
 print(final_plot_academic)
@@ -708,42 +654,6 @@ plot_q13_by_group <- function(data, group_var, group_label, q13_cols, q13_titles
   return(p)
 }
 
-# 先创建分组变量
-data <- data %>%
-  mutate(
-    # 年龄3分组（青年组/中年组/银发组）- 与后续分析一致
-    # 兼容文字格式和数字编码
-    age_group_3 = factor(
-      case_when(
-        age %in% c("18-25岁", "26-35岁", "1", "2", "3") ~ "青年组 (0-30岁)",
-        age %in% c("36-45岁", "46-55岁", "4", "5") ~ "中年组 (31-50岁)",
-        age %in% c("56-65岁", "65岁以上", "6") ~ "银发组 (>=51岁)",
-        TRUE ~ NA_character_
-      ),
-      levels = c("青年组 (0-30岁)", "中年组 (31-50岁)", "银发组 (>=51岁)")
-    ),
-    # 原始年龄6分组
-    age_group_6 = factor(age, levels = c("18-25岁", "26-35岁", "36-45岁",
-                                          "46-55岁", "56-65岁", "65岁以上")),
-    # 教育程度分组
-    edu_group = case_when(
-      education %in% c("初中及以下", "高中/中专/技校") ~ "高中及以下",
-      education == "大专" ~ "大专",
-      education == "本科" ~ "本科",
-      education %in% c("硕士", "博士") ~ "研究生",
-      TRUE ~ NA_character_
-    ),
-    # 收入分组
-    income_group = case_when(
-      monthly_income_personal %in% c("3000元以下", "3001-5000元") ~ "低收入(<5000)",
-      monthly_income_personal %in% c("5001-8000元", "8001-12000元") ~ "中收入(5000-12000)",
-      monthly_income_personal %in% c("12001-20000元", "20001-30000元", "30000元以上") ~ "高收入(>12000)",
-      TRUE ~ NA_character_
-    ),
-    # APP使用分组
-    app_user = ifelse(q1_used_app == 1, "APP用户", "非APP用户")
-  )
-
 # 按性别分组
 q13_by_gender <- plot_q13_by_group(data, "gender", "性别", q13_cols, q13_titles_map)
 print(q13_by_gender)
@@ -1117,12 +1027,6 @@ plot_bar_chart(data, "q4_know_carbon_credit")
 # 具体问题 ----
 ## 行为变化 ----
 # APP使用前后行为变化。
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(patchwork)
-library(knitr)
-library(kableExtra)
 
 # APP使用前后行为变化分析函数（改进版）
 analyze_behavior_change_wilcoxon <- function(
@@ -1341,11 +1245,6 @@ combined_behavior_plot <- ggplot(combined_data,
 print(combined_behavior_plot)
 
 # 绘制前后行为打分比例。
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(patchwork)
-
 # 函数：绘制行为前后选项比例图（5级李克特量表）
 plot_behavior_distribution <- function(
     data, pre_col_str, post_col_str, behavior_label) {
@@ -1444,8 +1343,6 @@ combined_plot <- Reduce(`+`, distribution_plots) +
 print(combined_plot)
 
 # 桑基图版本。
-library(ggsankey)  
-
 # 函数：绘制行为前后变化的桑基图
 plot_behavior_sankey <- function(
     data, pre_col_str, post_col_str, behavior_label) {
@@ -1538,12 +1435,6 @@ print(combined_sankey)
 
 
 # 使用APP和不使用APP的人差异是？
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(knitr)
-library(kableExtra)
-library(patchwork)
 
 # 1. 定义行为对应关系（三个时期）
 behavior_three_groups_map <- list(
@@ -2162,15 +2053,6 @@ Reduce(`+`, pie_ls_q20) + plot_layout(ncol = 2)
 
 # Elder behav change ----
 # --- (新增) 步骤 0: 加载所有必需的库 ---
-# 您的脚本中缺失了这些！
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(rstatix)
-library(ggsignif)   # 尽管我们用 rstatix 替代，但它有时是 rstatix 的依赖
-library(patchwork)  # 用于 wrap_plots
-library(knitr)      # 用于 kable
-
 # --- 步骤 1: 创建新的年龄分组 'age_group_3' ---
 # (此部分与您的代码相同，无需修改)
 data <- data %>%
@@ -3079,31 +2961,7 @@ combined_income_dist_plots <- wrap_plots(
 print(combined_income_dist_plots)
 
 # Education行为变化 ----
-# --- (新增) 按四个教育水平组进行行为变化对比分析 ---
-#
-# 变量: education
-# --- 步骤 1: 创建新的教育分组 'edu_group_4' ---
-data <- data %>%
-  mutate(
-    # 确保 education 是字符型以便匹配
-    edu_char = as.character(education),
-    
-    # 使用 case_when 创建新分组
-    edu_group_4 = case_when(
-      edu_char %in% c("1", "2") ~ "高中及以下 (1-2档)",
-      edu_char == "3"           ~ "大专 (3档)",
-      edu_char == "4"           ~ "本科 (4档)",
-      edu_char == "5"           ~ "研究生及以上 (5档)",
-      TRUE                      ~ NA_character_ # 其他情况设为NA
-    )
-  ) %>%
-  # 将其转换为有序因子，确保绘图顺序正确
-  mutate(
-    edu_group_4 = factor(
-      edu_group_4, 
-      levels = c("高中及以下 (1-2档)", "大专 (3档)", "本科 (4档)", "研究生及以上 (5档)")
-    )
-  )
+# --- 按四个教育水平组进行行为变化对比分析 ---
 
 # --- (辅助函数) 执行完整分析流程 (针对教育组) ---
 analyze_behavior_by_4_edu_groups <- function(
@@ -3401,16 +3259,6 @@ categorize_info_source <- function(x) {
     TRUE ~ "其他"
   )
 }
-
-# --- 步骤3: 应用分类编码 ---
-data <- data %>%
-  mutate(
-    info_source_cat_1 = categorize_info_source(q5_info_source_1),
-    info_source_cat_2 = categorize_info_source(q5_info_source_2),
-    info_source_cat_3 = categorize_info_source(q5_info_source_3),
-    # 创建主要信息渠道 (第一选择)
-    info_source_main = factor(info_source_cat_1)
-  )
 
 # 验证分类结果
 cat("\n信息渠道分类后频率:\n")
@@ -3721,17 +3569,6 @@ print(combined_gender_plots)
 # ============================================
 
 cat("\n\n=== 汽车拥有量组行为变化分析 ===\n")
-
-# 创建汽车拥有分组 (有车 vs 无车)
-data <- data %>%
-  mutate(
-    car_group = case_when(
-      car_ownership == "0辆" ~ "无车",
-      car_ownership %in% c("1辆", "2辆", "3辆及以上") ~ "有车",
-      TRUE ~ NA_character_
-    ),
-    car_group = factor(car_group, levels = c("无车", "有车"))
-  )
 
 # --- 辅助函数：按汽车拥有量分析行为变化 ---
 analyze_behavior_by_car <- function(
@@ -4913,13 +4750,7 @@ marital_combined_plot <- Reduce(`+`, lapply(marital_analysis_results, `[[`, "plo
   plot_annotation(title = "婚姻状况与行为改变")
 print(marital_combined_plot)
 
-# ============================================================
 # 补充分析3：Q4感知易用性和实用性描述性分析 ----
-# ============================================================
-cat("\n\n========================================\n")
-cat("补充分析3：Q4感知易用性和实用性分析\n")
-cat("========================================\n")
-
 # 定义Q4变量分组
 q4_usability <- c("q4_ui_simple", "q4_integrate_platform", "q4_auto_record")  # 感知易用性 1-3题
 q4_usefulness <- c("q4_clear_guidance", "q4_raise_awareness",
@@ -5010,11 +4841,6 @@ print(q4_bar_plot)
 
 # ============================================================
 # 补充分析4：Q14奖励偏好的群体差异分析 ----
-# ============================================================
-cat("\n\n========================================\n")
-cat("补充分析4：Q14奖励偏好的群体差异分析\n")
-cat("========================================\n")
-
 # Q14奖励偏好按群体分析
 q14_data <- data %>%
   filter(!is.na(q14_desired_reward)) %>%
