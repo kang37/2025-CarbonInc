@@ -110,7 +110,119 @@ variables <- c(
   "car_ownership"
 )
 
-# 重命名变量
+# 构建数据。
+combine_col_id <- 23
+data <- left_join(
+  # 个人属性等问题取文本。
+  read_excel(
+    "data_raw/320419112_按文本_2025年低碳减排问卷调查_1108_1067.xlsx", 
+    range = cell_cols(1:combine_col_id)
+  ) %>% 
+    rename(!!!head(question_map, combine_col_id)) %>% 
+    select(
+      -submit_time, -time_spent, -source, -source_detail, -ip_address, 
+      -total_score
+    ) %>% 
+    mutate(id = as.numeric(id)), 
+  # 调查主体问题取序号。
+  read_excel(
+    "data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx"
+  ) %>% 
+    rename(!!!question_map) %>% 
+    select(1, all_of(c(combine_col_id + 1):last_col())), 
+  by = "id"
+) %>% 
+  mutate(
+    age = case_when(
+      age %in% c("<18岁", "18–25岁", "26–30岁") ~ "<30", 
+      age %in% c("31–40岁", "41–50岁") ~ "31-50", 
+      age %in% c("≥51岁") ~ "≥51"
+    ), 
+    education = case_when(
+      education %in% c("初中及以下", "高中/技校") ~ "高中及以下", 
+      TRUE ~ education
+    ), 
+    marital_status = case_when(
+      marital_status %in% c("其他〖分居〗", "离婚", "未婚") ~ "独居", 
+      marital_status == "已婚" ~ "已婚"
+    ), 
+    monthly_income_personal = case_when(
+      monthly_income_personal %in% c("≤2000", "2000–4000", "4000–6000") ~ 
+        "<6000", 
+      monthly_income_personal %in% c("6000–8000", "8000–10000") ~ 
+        "6000-10000", 
+      monthly_income_personal %in% c("10000–20000") ~ 
+        "10000-20000", 
+      monthly_income_personal %in% c("20000–30000", "≥30000") ~ ">20000"
+    ), 
+    # 1. 确定除数（总人数 = 其他成员 + 受访者本人）
+    # 如果 other_pop 为 "≥5"，按 5 计算，总人数为 6
+    div_n = case_when(
+      family_other_pop == "≥5" ~ 6,
+      TRUE ~ as.numeric(as.character(family_other_pop)) + 1
+    ),
+    
+    # 2. 动态计算并生成字符串标签
+    mon_income_family_pc = case_when(
+      # 场景一：上限型 (≤4000)
+      monthly_income_family == "≤4000" ~ 
+        paste0("≤", round(4000 / div_n, 0)),
+      
+      # 场景二：区间型 (4000-6000)
+      monthly_income_family == "4000-6000" ~ 
+        paste0(round(4000 / div_n, 0), "-", round(6000 / div_n, 0)),
+      
+      monthly_income_family == "6000-8000" ~ 
+        paste0(round(6000 / div_n, 0), "-", round(8000 / div_n, 0)),
+      
+      monthly_income_family == "8000-10000" ~ 
+        paste0(round(8000 / div_n, 0), "-", round(10000 / div_n, 0)),
+      
+      monthly_income_family == "10000-20000" ~ 
+        paste0(round(10000 / div_n, 0), "-", round(20000 / div_n, 0)),
+      
+      monthly_income_family == "20000-30000" ~ 
+        paste0(round(20000 / div_n, 0), "-", round(30000 / div_n, 0)),
+      # 场景三：下限型 (≥30,000)
+      # 先去掉逗号再计算
+      monthly_income_family == "≥30,000" | monthly_income_family == "≥30000" ~ 
+        paste0("≥", round(30000 / div_n, 0))
+    ), 
+    # 为了分类，我们需要提取标签中的“上限”数值进行逻辑判断
+    upper_bound = case_when(
+      str_detect(mon_income_family_pc, "≤") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "\\d+")),
+      str_detect(mon_income_family_pc, "≥") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "\\d+")),
+      str_detect(mon_income_family_pc, "-") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "(?<=-)\\d+")),
+      TRUE ~ NA_real_
+    ),
+    # 进一步整理为高中低收入
+    mon_income_family_pc_lvl = case_when(
+      # 1. 最高档：只要上限或下限超过 8000
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 9000) | 
+        upper_bound > 9000 ~ "≥9000",
+      # 2. 中高档：剩下的里面，上限超过 6000 的（即 6001-8000）
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 6000) | 
+        upper_bound > 6000 ~ "6000-9000",
+      # 3. 中等档：剩下的里面，上限超过 4000 的（即 4001-6000）
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 3000) | 
+        upper_bound > 3000 ~ "3000-6000",
+      # 4. 低收入：剩下的所有情况（即上限 <= 4000 的所有人群）
+      TRUE ~ "≤3000"
+    ), 
+    mon_income_family_pc_lvl = factor(mon_income_family_pc_lvl, levels = c(
+      "≤3000", "3000-6000", "6000-9000", "≥9000"
+    )),
+    car_ownership = case_when(
+      car_ownership %in% c("2", "≥3") ~ "≥2", 
+      TRUE ~ car_ownership
+    ), 
+    q1_used_app = grepl("使用过", q1_used_app)
+  ) %>% 
+  # 移除中间变量。
+  select(-div_n, -upper_bound)
 
 # 基本情况饼图 ----
 # 定义对应的图表标题
