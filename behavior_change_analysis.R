@@ -191,18 +191,35 @@ analyze_by_group <- function(data, behavior_name, pre_col, post_col, group_var, 
   result
 }
 
+# 预处理：合并教育分组（大专和高中及以下 -> 大专及以下）
+data_processed <- data %>%
+  mutate(
+    education_merged = case_when(
+      education %in% c("大专", "高中及以下") ~ "大专及以下",
+      TRUE ~ as.character(education)
+    )
+  )
+
+# 更新分组变量（教育使用合并后的变量）
+group_vars_processed <- c(
+  "gender" = "性别",
+  "age" = "年龄组",
+  "marital_status" = "婚姻状况",
+  "education_merged" = "教育水平"
+)
+
 # 批量分析所有行为×所有维度
 all_group_results <- lapply(names(behavior_map), function(b) {
   cols <- behavior_map[[b]]
-  lapply(names(group_vars), function(gvar) {
-    analyze_by_group(data, b, cols[1], cols[2], gvar, group_vars[gvar])
+  lapply(names(group_vars_processed), function(gvar) {
+    analyze_by_group(data_processed, b, cols[1], cols[2], gvar, group_vars_processed[gvar])
   }) %>% bind_rows()
-}) %>% 
+}) %>%
   bind_rows()
 
 # 按维度输出结果
 for (dim_name in unique(all_group_results$维度)) {
-  cat("\n\n--- 3.", which(group_vars == dim_name), " ", dim_name, "分组分析 ---\n", sep = "")
+  cat("\n\n--- 3.", which(group_vars_processed == dim_name), " ", dim_name, "分组分析 ---\n", sep = "")
 
   all_group_results %>%
     filter(维度 == dim_name) %>%
@@ -210,7 +227,7 @@ for (dim_name in unique(all_group_results$维度)) {
            均值差异, Q1_Diff, 中位数_Diff, Q3_Diff, 显著性_组内, 显著性_组间) %>%
     kable(digits = 2, format = "simple",
           col.names = c("行为", "群体", "N", "前均值", "前SD", "后均值", "后SD",
-                        "均值差", "Q1", "中位数", "Q3", "组内", "组间")) %>% 
+                        "均值差", "Q1", "中位数", "Q3", "组内", "组间")) %>%
     print()
 }
 
@@ -259,7 +276,7 @@ between_heatmap_data <- all_group_results %>%
   distinct() %>%
   mutate(
     行为 = factor(行为, levels = names(behavior_map)),
-    维度 = factor(维度, levels = group_vars),
+    维度 = factor(维度, levels = group_vars_processed),
     neg_log_p = pmin(-log10(pmax(p_between, 1e-4)), 4)
   )
 
