@@ -3,12 +3,8 @@
 # 包含：桑基图、行为变化分析、三组对比、Q4/Q20感知分析、Q13/Q14/Q15多选题分析
 # ==============================================================================
 
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(ggsankey)
-library(patchwork)
-library(knitr)
+pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext)
+showtext_auto()
 
 # ==============================================================================
 # 全局配置
@@ -204,16 +200,16 @@ for (dim in unique(behavior_by_group$维度)) {
 }
 
 # 2.4 热图
-behavior_by_group %>%
+p1 <- behavior_by_group %>%
   mutate(行为 = factor(行为, levels = names(behavior_prepost))) %>%
   ggplot(aes(x = 行为, y = paste(维度, grp, sep = " - "), fill = (组内 != "ns" & 组内 != "NA"))) +
   geom_tile(color = "white") + geom_text(aes(label = 组内), size = 3) +
   facet_grid(维度 ~ ., scales = "free_y", space = "free_y") +
   labs(title = "分群体行为变化显著性（组内配对检验）", x = "行为", y = "") +
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-    axis.text.x = element_text(angle = 30, hjust = 1), strip.text.y = element_text(angle = 0), panel.grid = element_blank(), legend.position = "none") -> p1
+    axis.text.x = element_text(angle = 30, hjust = 1), strip.text.y = element_text(angle = 0), panel.grid = element_blank(), legend.position = "none")
 print(p1)
-ggsave("data_proc/behavior_change_within_group.png", p1, width = 11, height = 10, dpi = 300, bg = "white")
+ggsave("data_proc/behavior_change_within_group.png", p1, width = 11, height = 10, dpi = 300, bg = "white", units = "cm")
 
 
 # ##############################################################################
@@ -273,7 +269,7 @@ three_pairwise %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p2
 print(p2)
-ggsave("data_proc/three_group_significance.png", p2, width = 10, height = 5, dpi = 300, bg = "white")
+ggsave("data_proc/three_group_significance.png", p2, width = 10, height = 5, dpi = 300, bg = "white", units = "cm")
 
 
 # ##############################################################################
@@ -329,7 +325,7 @@ q4q20_tests %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p3
 print(p3)
-ggsave("data_proc/q4_q20_group_diff_heatmap.png", p3, width = 14, height = 5, dpi = 300, bg = "white")
+ggsave("data_proc/q4_q20_group_diff_heatmap.png", p3, width = 14, height = 5, dpi = 300, bg = "white", units = "cm")
 
 
 # ##############################################################################
@@ -397,7 +393,7 @@ q13_by_group %>% select(维度, 选项, p.value) %>% distinct() %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p4
 print(p4)
-ggsave("data_proc/q13_attract_significance.png", p4, width = 10, height = 5, dpi = 300, bg = "white")
+ggsave("data_proc/q13_attract_significance.png", p4, width = 10, height = 5, dpi = 300, bg = "white", units = "cm")
 
 # 5.2 Q14 期望奖励
 cat("\n--- 5.2 Q14 期望奖励 ---\n")
@@ -435,7 +431,7 @@ q15_by_group %>% select(维度, 选项, p.value) %>% distinct() %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p5
 print(p5)
-ggsave("data_proc/q15_barrier_significance.png", p5, width = 9, height = 5, dpi = 300, bg = "white")
+ggsave("data_proc/q15_barrier_significance.png", p5, width = 9, height = 5, dpi = 300, bg = "white", units = "cm")
 
 
 # ==============================================================================
