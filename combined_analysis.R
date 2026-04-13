@@ -78,16 +78,16 @@ q15_barrier <- c(
 )
 
 # 作图设置。
-pub_theme <- theme_bw(base_size = 12, base_family = "serif") +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5, size = 13),
-    axis.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major = element_line(color = "grey92"),
-    legend.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "grey95"),
-    strip.text = element_text(face = "bold")
-  )
+pub_theme <- theme_bw(base_size = 30, base_family = "serif") + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = rel(1.0)))
+  # theme(
+  #   axis.title = element_text(face = "bold"),
+  #   panel.grid.minor = element_blank(),
+  #   panel.grid.major = element_line(color = "grey92"),
+  #   legend.title = element_text(face = "bold"),
+  #   strip.background = element_rect(fill = "grey95"),
+  #   strip.text = element_text(face = "bold")
+  # )
 
 # ##############################################################################
 # PART 1: 桑基图 - APP使用前后行为变化流向
@@ -110,7 +110,7 @@ plot_sankey <- function(data, pre_col, post_col, label) {
   ggplot(d, aes(x = x, next_x = next_x, node = node, next_node = next_node, fill = score, value = value)) +
     geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.1) +
     scale_fill_manual(values = c("1"="#D32F2F","2"="#F57C00","3"="#FDD835","4"="#66BB6A","5"="#2E7D32"),
-                      name = "Score", labels = c("1 (Rarely)","2","3","4","5 (Frequently)")) +
+                      name = "Score", labels = c("1","2","3","4","5")) +
     scale_x_discrete(labels = c("Pre" = "Before", "Post" = "After")) +
     labs(title = label, x = NULL, y = NULL) +
     pub_theme +
@@ -124,7 +124,7 @@ sankey_list[[length(sankey_list)]] <- sankey_list[[length(sankey_list)]] + theme
 
 p_sankey <- Reduce(`+`, sankey_list) + plot_layout(ncol = 2, guides = "collect")
 print(p_sankey)
-ggsave("data_proc/sankey_behavior_change.png", p_sankey, width = 24, height = 20, units = "cm", dpi = 300, bg = "white")
+ggsave("data_proc/sankey_behavior_change.png", p_sankey, width = 14, height = 20, units = "cm", dpi = 300, bg = "white")
 
 
 # ##############################################################################
