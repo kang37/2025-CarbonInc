@@ -1,15 +1,11 @@
-# ==============================================================================
 # 综合分析脚本
 # 包含：桑基图、行为变化分析、三组对比、Q4/Q20感知分析、Q13/Q14/Q15多选题分析
-# ==============================================================================
 
+# 载入包。
 pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext)
 showtext_auto()
 
-# ==============================================================================
-# 全局配置
-# ==============================================================================
-
+# 全局配置 ----
 # 行为变量映射（前后对比）
 behavior_prepost <- list(
   "公共交通" = c(pre = "q16_pre_public_trans", post = "q18_change_public_trans"),
@@ -81,6 +77,17 @@ q15_barrier <- c(
   "q15_barrier_unknown" = "没听说过此类APP"
 )
 
+# 作图设置。
+pub_theme <- theme_bw(base_size = 12, base_family = "serif") +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 13),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey92"),
+    legend.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "grey95"),
+    strip.text = element_text(face = "bold")
+  )
 
 # ##############################################################################
 # PART 1: 桑基图 - APP使用前后行为变化流向
@@ -325,7 +332,7 @@ q4q20_tests %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p3
 print(p3)
-ggsave("data_proc/q4_q20_group_diff_heatmap.png", p3, width = 14, height = 5, dpi = 300, bg = "white", units = "cm")
+ggsave("data_proc/q4_q20_group_diff_heatmap.png", p3, width = 14, height = 5, dpi = 300, bg = "white")
 
 
 # ##############################################################################
@@ -393,7 +400,7 @@ q13_by_group %>% select(维度, 选项, p.value) %>% distinct() %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p4
 print(p4)
-ggsave("data_proc/q13_attract_significance.png", p4, width = 10, height = 5, dpi = 300, bg = "white", units = "cm")
+ggsave("data_proc/q13_attract_significance.png", p4, width = 10, height = 5, dpi = 300, bg = "white")
 
 # 5.2 Q14 期望奖励
 cat("\n--- 5.2 Q14 期望奖励 ---\n")
@@ -431,7 +438,7 @@ q15_by_group %>% select(维度, 选项, p.value) %>% distinct() %>%
   theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"),
     axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank(), legend.position = "none") -> p5
 print(p5)
-ggsave("data_proc/q15_barrier_significance.png", p5, width = 9, height = 5, dpi = 300, bg = "white", units = "cm")
+ggsave("data_proc/q15_barrier_significance.png", p5, width = 9, height = 5, dpi = 300, bg = "white")
 
 
 # ==============================================================================
