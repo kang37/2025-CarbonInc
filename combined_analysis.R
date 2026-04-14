@@ -132,16 +132,18 @@ plot_sankey <- function(data, pre_col, post_col, label, print_table = FALSE) {
   d$score <- factor(d$node, levels = lvls)
 
   ggplot(d, aes(x = x, next_x = next_x, node = node, next_node = next_node, fill = score, value = value)) +
-    geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.15, linewidth = 0.1) +
+    geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.35, linewidth = 0.1) +
     scale_fill_manual(values = c("1"="#D32F2F","2"="#F57C00","3"="#FDD835","4"="#66BB6A","5"="#2E7D32"),
                       name = "Score", labels = lvls) +
-    scale_x_discrete(labels = c("Pre" = "Before", "Post" = "After")) +
+    scale_x_discrete(labels = c("Pre" = "Before", "Post" = "After"), expand = c(0.05, 0.05)) +
+    scale_y_continuous(expand = c(0.02, 0.02)) +
     labs(title = label, x = NULL, y = NULL) +
     theme_void() +
     theme(
       legend.position = "none",
       plot.title = element_text(size = 10),
-      axis.text.x = element_text(size = 9)
+      axis.text.x = element_text(size = 9),
+      plot.margin = margin(2, 2, 2, 2)
     )
 }
 
@@ -150,6 +152,10 @@ sankey_list <- lapply(seq_along(names(behavior_prepost)), function(i) {
   label <- paste0("(", letters[i], ")")
   plot_sankey(data, behavior_prepost[[b]][["pre"]], behavior_prepost[[b]][["post"]], label, print_table = TRUE)
 })
+
+cat("\n--- Sankey Diagram Legend ---\n")
+cat(paste(sprintf("(%s) %s", letters[seq_along(names(behavior_prepost))], names(behavior_prepost)), collapse = "\n"), "\n")
+
 sankey_list[[length(sankey_list)]] <- sankey_list[[length(sankey_list)]] + theme(legend.position = "right")
 
 p_sankey <- Reduce(`+`, sankey_list) + plot_layout(ncol = 2, guides = "collect")
