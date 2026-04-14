@@ -366,30 +366,28 @@ exp_print_fig(
   three_pairwise %>%
     mutate(Behavior = factor(Behavior, names(behavior_three)),
            Comparison = factor(
-             Comparison, 
+             Comparison,
              c("Before vs After", "Before vs Non-User", "After vs Non-User")
-           )) %>%
+           ),
+           label_text = paste0(round(W_stat, 0), "\n", Sig)) %>%
     ggplot(aes(x = Behavior, y = Comparison, fill = Is_Sig)) +
     geom_tile(color = "white", linewidth = 0.8) +
-    geom_text(aes(label = Sig), size = 5, fontface = "bold") +
+    geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
     scale_fill_manual(
       values = c("TRUE" = "#4CAF50", "FALSE" = "#EEEEEE"), guide = "none"
     ) +
-    labs(title = "(h)", x = "Behavior", y = "Comparison") +
+    labs(x = "Behavior", y = "Comparison") +
     pub_theme +
     theme(
-      axis.text.x = element_text(angle = 30, hjust = 1), 
+      axis.text.x = element_text(angle = 30, hjust = 1),
       panel.grid = element_blank()
-    ), 
-  "用户使用前后和非用户对比.png", 
+    ),
+  "用户使用前后和非用户对比.png",
   width = 14, height = 8
 )
 
 
-# ##############################################################################
 # PART 4: Q4/Q20 APP感知与使用因素分析
-# ##############################################################################
-
 cat("\n\n", strrep("#", 80), "\n")
 cat("PART 4: Q4/Q20 APP Perception Analysis\n")
 cat(strrep("#", 80), "\n")
