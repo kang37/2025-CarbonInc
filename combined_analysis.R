@@ -5,6 +5,14 @@
 pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext)
 showtext_auto()
 
+# Bug: data来自report.r
+app_users <- data %>% 
+  filter(q1_used_app == 1) %>% 
+  mutate(education = case_when(
+    education %in% c("大专", "高中及以下") ~ "大专或以下", 
+    TRUE ~ education
+  ))
+
 # 全局配置 ----
 # 行为变量映射（前后对比）
 behavior_prepost <- list(
@@ -91,13 +99,8 @@ pub_theme <- theme_bw(base_size = 18, base_family = "serif") +
     strip.text = element_text(face = "bold", size = rel(0.8))
   )
 
-# ##############################################################################
 # PART 1: 桑基图 - APP使用前后行为变化流向
-# ##############################################################################
-
-cat("\n", strrep("#", 80), "\n")
 cat("PART 1: Sankey Diagram - Behavior Change Flow\n")
-cat(strrep("#", 80), "\n")
 
 plot_sankey <- function(data, pre_col, post_col, label, print_table = FALSE) {
   # 统一因子水平 1-5
@@ -150,7 +153,7 @@ plot_sankey <- function(data, pre_col, post_col, label, print_table = FALSE) {
 sankey_list <- lapply(seq_along(names(behavior_prepost)), function(i) {
   b <- names(behavior_prepost)[i]
   label <- paste0("(", letters[i], ")")
-  plot_sankey(data, behavior_prepost[[b]][["pre"]], behavior_prepost[[b]][["post"]], label, print_table = TRUE)
+  plot_sankey(app_users, behavior_prepost[[b]][["pre"]], behavior_prepost[[b]][["post"]], label, print_table = TRUE)
 })
 
 cat("\n--- Sankey Diagram Legend ---\n")
@@ -167,14 +170,8 @@ png(
 p_sankey
 dev.off()
 
-# PART 2: APP使用前后行为变化分析（整体+分群体）
-cat("\n\n", strrep("#", 80), "\n")
-cat("PART 2: Behavior Change Analysis\n")
-cat(strrep("#", 80), "\n")
-
-app_users <- data %>% filter(q1_used_app == 1)
-
-# 2.1 整体描述性统计
+## APP使用前后行为变化 ----
+### 整体分析 ----
 # 函数：导出表格并打印。
 exp_print_tbl <- function(tbl_x, exp_tbl_title_x) {
   # 打印表格。
@@ -197,10 +194,10 @@ exp_print_tbl(
       mutate(Behavior = b, Period = factor(ifelse(Period == "Pre", "Before", "After"), c("Before", "After")))
   }) %>% bind_rows() %>% arrange(Behavior, Period) %>%
     select(Behavior, Period, N, Mean, SD, Q1, Median, Q3), 
-  "data_proc/使用前后行为描述性分析.csv"
+  "使用前后行为描述性分析.csv"
 )
 
-# 2.2 整体Wilcoxon检验
+# 整体Wilcoxon检验。
 exp_print_tbl(
   lapply(names(behavior_prepost), function(b) {
     d <- app_users %>%
@@ -215,36 +212,44 @@ exp_print_tbl(
   "行为变化_整体.csv"
 )
 
-# 2.3 分群体分析
+
+### 分群体分析 ----
 # 预处理：合并教育分组
-data_edu <- data %>%
-  mutate(education_merged = case_when(
-    education %in% c("大专", "高中及以下") ~ "Associate-", TRUE ~ as.character(education)))
-
 # 教育分组英文映射
-edu_merged_map <- c("Associate-" = "Associate-", "本科" = "Bachelor", "硕士及以上" = "Master+")
+edu_map <- c("大专或以下" = "Below Bachelor", "本科" = "Bachelor", "硕士或博士" = "Master's or Doctoral")
 gender_map <- c("男" = "Male", "女" = "Female")
-age_map <- c("18-25岁" = "18-25", "26-35岁" = "26-35", "36-45岁" = "36-45",
-             "46-55岁" = "46-55", "56岁及以上" = "56+")
-marital_map <- c("未婚" = "Single", "已婚" = "Married", "离异/丧偶" = "Divorced/Widowed")
-
-demo_groups_edu <- c("gender" = "Gender", "age" = "Age", "marital_status" = "Marital Status", "education_merged" = "Education")
+# age_map <- c("18-25岁" = "18-25", "26-35岁" = "26-35", "36-45岁" = "36-45",
+#              "46-55岁" = "46-55", "56岁及以上" = "56+")
+marital_map <- c("已婚" = "Married", "独居" = "Single/Divorced/Widowed")
+demo_groups_edu <- c("gender" = "Gender", "age" = "Age", "marital_status" = "Marital Status", "education" = "Education")
 
 behavior_by_group <- lapply(names(behavior_prepost), function(b) {
   lapply(names(demo_groups_edu), function(gvar) {
-    d <- data_edu %>%
-      filter(q1_used_app == 1 & !is.na(.data[[gvar]])) %>%
-      select(grp = all_of(gvar), Pre = all_of(behavior_prepost[[b]][["pre"]]), Post = all_of(behavior_prepost[[b]][["post"]])) %>%
-      mutate(across(c(Pre, Post), as.numeric)) %>% filter(!is.na(Pre) & !is.na(Post)) %>%
+    d <- app_users %>%
+      filter(!is.na(.data[[gvar]])) %>%
+      select(
+        grp = all_of(gvar), 
+        Pre = all_of(behavior_prepost[[b]][["pre"]]), 
+        Post = all_of(behavior_prepost[[b]][["post"]])
+      ) %>%
+      mutate(across(c(Pre, Post), as.numeric)) %>% 
+      filter(!is.na(Pre) & !is.na(Post)) %>%
       mutate(Diff = Post - Pre)
 
     stats <- d %>% group_by(grp) %>%
-      summarise(N = n(), Pre_Mean = round(mean(Pre), 2), Pre_SD = round(sd(Pre), 2),
-                Post_Mean = round(mean(Post), 2), Post_SD = round(sd(Post), 2), Diff_Mean = round(mean(Diff), 3),
-                Q1 = quantile(Diff, 0.25), Median = median(Diff), Q3 = quantile(Diff, 0.75),
-                p_within = tryCatch(wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$p.value, error = function(e) NA_real_),
-                V_stat = tryCatch(wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$statistic, error = function(e) NA_real_),
-                .groups = "drop") %>%
+      summarise(
+        N = n(), 
+        Pre_Mean = round(mean(Pre), 2), Pre_SD = round(sd(Pre), 2),
+        Post_Mean = round(mean(Post), 2), Post_SD = round(sd(Post), 2), 
+        Diff_Mean = round(mean(Diff), 3),
+        # 四分位数。
+        Q1 = quantile(Diff, 0.25), 
+        Median = median(Diff), 
+        Q3 = quantile(Diff, 0.75),
+        p_within = tryCatch(wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$p.value, error = function(e) NA_real_),
+        V_stat = tryCatch(wilcox.test(Post, Pre, paired = TRUE, alternative = "greater", exact = FALSE)$statistic, error = function(e) NA_real_),
+        .groups = "drop"
+      ) %>%
       mutate(Within = case_when(is.na(p_within) ~ "NA", p_within < 0.001 ~ "***", p_within < 0.01 ~ "**", p_within < 0.05 ~ "*", TRUE ~ "ns"))
 
     n_grp <- n_distinct(d$grp)
@@ -254,15 +259,16 @@ behavior_by_group <- lapply(names(behavior_prepost), function(b) {
     stats %>% mutate(Behavior = b, Dimension = demo_groups_edu[gvar], p_between = p_btw,
                      Between = case_when(is.na(p_btw) ~ "NA", p_btw < 0.001 ~ "***", p_btw < 0.01 ~ "**", p_btw < 0.05 ~ "*", TRUE ~ "ns"))
   }) %>% bind_rows()
-}) %>% bind_rows()
+}) %>% 
+  bind_rows()
 
 # 翻译群体名称
 behavior_by_group <- behavior_by_group %>%
   mutate(grp_en = case_when(
     Dimension == "Gender" ~ gender_map[grp],
-    Dimension == "Age" ~ age_map[grp],
+    # Dimension == "Age" ~ age_map[grp],
     Dimension == "Marital Status" ~ marital_map[grp],
-    Dimension == "Education" ~ edu_merged_map[grp],
+    Dimension == "Education" ~ edu_map[grp],
     TRUE ~ grp
   ))
 
@@ -277,33 +283,42 @@ for (dim in unique(behavior_by_group$Dimension)) {
 behavior_by_group <- behavior_by_group %>%
   mutate(label_text = paste0("V=", round(V_stat, 0), "\n", Within))
 
-p1 <- behavior_by_group %>%
-  mutate(Behavior = factor(Behavior, levels = names(behavior_prepost)),
-         Dimension = factor(Dimension, levels = c("Gender", "Age", "Marital Status", "Education"))) %>%
-  ggplot(aes(x = grp_en, y = Behavior, fill = (Within != "ns" & Within != "NA"))) +
-  geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
-  facet_grid(. ~ Dimension, scales = "free_x", space = "free_x") +
-  scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "(g)",
-       x = "Demographic Group", y = "Behavior") +
-  pub_theme +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        strip.text = element_text(face = "bold"),
-        panel.grid = element_blank())
-print(p1)
-ggsave("data_proc/behavior_change_within_group.png", p1, width = 28, height = 16, units = "cm", dpi = 300, bg = "white")
+# 函数：打印并保存图片。
+exp_print_fig <- function(fig_x, file_name_x, ...) {
+  # 打印图片。
+  print(fig_x)
+  # 保存图片。
+  png(
+    paste0("data_proc/", file_name_x), 
+    units = "cm", res = 300, ...
+  )
+  print(fig_x)
+  dev.off()
+}
+# 分群体统计比较结果热力图。
+exp_print_fig(
+  behavior_by_group %>%
+    mutate(label_text = paste0(round(V_stat, 0), "\n", Within)) %>% 
+    mutate(Behavior = factor(Behavior, levels = names(behavior_prepost)),
+           Dimension = factor(Dimension, levels = c("Gender", "Age", "Marital Status", "Education"))) %>%
+    ggplot(aes(x = grp_en, y = Behavior, fill = (Within != "ns" & Within != "NA"))) +
+    geom_tile(color = "white", linewidth = 0.8) +
+    geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
+    facet_grid(. ~ Dimension, scales = "free_x", space = "free_x") +
+    scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
+    labs(x = "Demographic Group", y = "Behavior") +
+    pub_theme +
+    theme(axis.text.x = element_text(hjust = 1, angle = 90, size = rel(0.8)),
+          strip.text = element_text(face = "bold"),
+          panel.grid = element_blank()), 
+  "行为变化_分群体_热力图.png", 
+  width = 16, height = 15
+)
 
 # PART 3: 三组对比（使用前 vs 使用后 vs 非用户）
-
-cat("\n\n", strrep("#", 80), "\n")
-cat("PART 3: Three-Group Comparison\n")
-cat(strrep("#", 80), "\n")
-
 three_levels <- c("Before", "After", "Non-User")
 
 # 3.1 描述性统计
-cat("\n--- 3.1 Descriptive Statistics (Three Groups) ---\n")
 three_desc <- lapply(names(behavior_three), function(b) {
   cols <- behavior_three[[b]]
   bind_rows(
@@ -319,7 +334,6 @@ three_desc <- lapply(names(behavior_three), function(b) {
 three_desc %>% select(Behavior, Group, N, Mean, SD, Q1, Median, Q3) %>% kable(digits = 2, format = "simple") %>% print()
 
 # 3.2 两两比较
-cat("\n--- 3.2 Pairwise Comparison ---\n")
 three_pairwise <- lapply(names(behavior_three), function(b) {
   cols <- behavior_three[[b]]
   scores <- list(
@@ -348,18 +362,28 @@ write.csv(three_pairwise %>% mutate(p_raw = format.pval(p_raw, 3), p_adj = forma
           "data_proc/three_group_comparison_table.csv", row.names = FALSE)
 
 # 3.3 热图
-p2 <- three_pairwise %>%
-  mutate(Behavior = factor(Behavior, names(behavior_three)),
-         Comparison = factor(Comparison, c("Before vs After", "Before vs Non-User", "After vs Non-User"))) %>%
-  ggplot(aes(x = Behavior, y = Comparison, fill = Is_Sig)) +
-  geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = Sig), size = 5, fontface = "bold") +
-  scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#EEEEEE"), guide = "none") +
-  labs(title = "(h)", x = "Behavior", y = "Comparison") +
-  pub_theme +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
-print(p2)
-ggsave("data_proc/three_group_significance.png", p2, width = 20, height = 10, units = "cm", dpi = 300, bg = "white")
+exp_print_fig(
+  three_pairwise %>%
+    mutate(Behavior = factor(Behavior, names(behavior_three)),
+           Comparison = factor(
+             Comparison, 
+             c("Before vs After", "Before vs Non-User", "After vs Non-User")
+           )) %>%
+    ggplot(aes(x = Behavior, y = Comparison, fill = Is_Sig)) +
+    geom_tile(color = "white", linewidth = 0.8) +
+    geom_text(aes(label = Sig), size = 5, fontface = "bold") +
+    scale_fill_manual(
+      values = c("TRUE" = "#4CAF50", "FALSE" = "#EEEEEE"), guide = "none"
+    ) +
+    labs(title = "(h)", x = "Behavior", y = "Comparison") +
+    pub_theme +
+    theme(
+      axis.text.x = element_text(angle = 30, hjust = 1), 
+      panel.grid = element_blank()
+    ), 
+  "用户使用前后和非用户对比.png", 
+  width = 14, height = 8
+)
 
 
 # ##############################################################################
