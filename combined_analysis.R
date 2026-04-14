@@ -78,16 +78,18 @@ q15_barrier <- c(
 )
 
 # 作图设置。
-pub_theme <- theme_bw(base_size = 30, base_family = "serif") + 
-  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = rel(1.0)))
-  # theme(
-  #   axis.title = element_text(face = "bold"),
-  #   panel.grid.minor = element_blank(),
-  #   panel.grid.major = element_line(color = "grey92"),
-  #   legend.title = element_text(face = "bold"),
-  #   strip.background = element_rect(fill = "grey95"),
-  #   strip.text = element_text(face = "bold")
-  # )
+pub_theme <- theme_bw(base_size = 18, base_family = "serif") +
+  theme(
+    plot.title = element_text(size = rel(0.8)),
+    axis.title = element_text(face = "bold", size = rel(0.9)),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey92"),
+    legend.title = element_text(face = "bold", size = rel(0.8)),
+    legend.text = element_text(size = rel(0.7)),
+    legend.key.size = unit(0.5, "cm"),
+    strip.background = element_rect(fill = "grey95"),
+    strip.text = element_text(face = "bold", size = rel(0.8))
+  )
 
 # ##############################################################################
 # PART 1: 桑基图 - APP使用前后行为变化流向
@@ -97,40 +99,70 @@ cat("\n", strrep("#", 80), "\n")
 cat("PART 1: Sankey Diagram - Behavior Change Flow\n")
 cat(strrep("#", 80), "\n")
 
-plot_sankey <- function(data, pre_col, post_col, label) {
+plot_sankey <- function(data, pre_col, post_col, label, print_table = FALSE) {
+  # 统一因子水平 1-5
+  lvls <- as.character(1:5)
+
   d <- data %>%
     select(Pre = all_of(pre_col), Post = all_of(post_col)) %>%
-    mutate(Pre = as.factor(as.numeric(Pre)), Post = as.factor(as.numeric(Post))) %>%
+    # 显式转换为带统一水平的因子，确保排序一致
+    mutate(
+      Pre = factor(as.character(as.numeric(Pre)), levels = lvls),
+      Post = factor(as.character(as.numeric(Post)), levels = lvls)
+    ) %>%
     filter(!is.na(Pre) & !is.na(Post)) %>%
     count(Pre, Post, name = "Count") %>%
     make_long(Pre, Post, value = Count)
 
-  d$score <- gsub(".*(\\d)$", "\\1", d$node)
+  # 打印节点百分比表格
+  if (print_table) {
+    node_pct <- d %>%
+      filter(!is.na(node)) %>%
+      group_by(x, node) %>%
+      summarise(total = sum(value), .groups = "drop") %>%
+      group_by(x) %>%
+      mutate(pct = sprintf("%.1f%%", total / sum(total) * 100)) %>%
+      select(Stage = x, Score = node, N = total, Percent = pct) %>%
+      arrange(Stage, Score)
+    cat("\n", label, "\n")
+    print(knitr::kable(node_pct, format = "simple"))
+  }
+
+  # 提取分数用于着色
+  d$score <- factor(d$node, levels = lvls)
 
   ggplot(d, aes(x = x, next_x = next_x, node = node, next_node = next_node, fill = score, value = value)) +
-    geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.1) +
+    geom_sankey(flow.alpha = 0.5, node.color = "gray30", width = 0.15, linewidth = 0.1) +
     scale_fill_manual(values = c("1"="#D32F2F","2"="#F57C00","3"="#FDD835","4"="#66BB6A","5"="#2E7D32"),
-                      name = "Score", labels = c("1","2","3","4","5")) +
+                      name = "Score", labels = lvls) +
     scale_x_discrete(labels = c("Pre" = "Before", "Post" = "After")) +
     labs(title = label, x = NULL, y = NULL) +
-    pub_theme +
-    theme(legend.position = "none", axis.text.y = element_blank(), panel.grid = element_blank())
+    theme_void() +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(size = 10),
+      axis.text.x = element_text(size = 9)
+    )
 }
 
-sankey_list <- lapply(names(behavior_prepost), function(b) {
-  plot_sankey(data, behavior_prepost[[b]][["pre"]], behavior_prepost[[b]][["post"]], b)
+sankey_list <- lapply(seq_along(names(behavior_prepost)), function(i) {
+  b <- names(behavior_prepost)[i]
+  label <- paste0("(", letters[i], ")")
+  plot_sankey(data, behavior_prepost[[b]][["pre"]], behavior_prepost[[b]][["post"]], label, print_table = TRUE)
 })
 sankey_list[[length(sankey_list)]] <- sankey_list[[length(sankey_list)]] + theme(legend.position = "right")
 
 p_sankey <- Reduce(`+`, sankey_list) + plot_layout(ncol = 2, guides = "collect")
 print(p_sankey)
-ggsave("data_proc/sankey_behavior_change.png", p_sankey, width = 14, height = 20, units = "cm", dpi = 300, bg = "white")
+png(
+  "data_proc/sankey_behavior_change.png", 
+  width = 16, height = 20, units = "cm", res = 300
+)
+p_sankey
+dev.off()
 
 
-# ##############################################################################
 # PART 2: APP使用前后行为变化分析（整体+分群体）
-# ##############################################################################
-
 cat("\n\n", strrep("#", 80), "\n")
 cat("PART 2: Behavior Change Analysis\n")
 cat(strrep("#", 80), "\n")
@@ -237,7 +269,7 @@ p1 <- behavior_by_group %>%
   geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
   facet_grid(. ~ Dimension, scales = "free_x", space = "free_x") +
   scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "Within-Group Behavior Change Significance (Paired Wilcoxon Test)",
+  labs(title = "(g)",
        x = "Demographic Group", y = "Behavior") +
   pub_theme +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
@@ -310,7 +342,7 @@ p2 <- three_pairwise %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = Sig), size = 5, fontface = "bold") +
   scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#EEEEEE"), guide = "none") +
-  labs(title = "Three-Group Pairwise Comparison Significance", x = "Behavior", y = "Comparison") +
+  labs(title = "(h)", x = "Behavior", y = "Comparison") +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
 print(p2)
@@ -381,7 +413,7 @@ p3 <- q4q20_tests %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 3, lineheight = 0.85) +
   scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "Q4/Q20 Perception: Group Differences by Demographics", x = "Perception Item", y = "Dimension") +
+  labs(title = "(i)", x = "Perception Item", y = "Dimension") +
   pub_theme +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank())
 print(p3)
@@ -460,7 +492,7 @@ p_q13_sig <- q13_tests %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
   scale_fill_manual(values = c("TRUE" = "#2196F3", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "Q13 Attraction: Group Differences", x = NULL, y = "Dimension") +
+  labs(title = "(j)", x = NULL, y = "Dimension") +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
 
@@ -473,7 +505,7 @@ p_q13_prop <- q13_freq %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
   scale_fill_gradient(low = "#90CAF9", high = "#1565C0", name = "Proportion") +
-  labs(title = "Q13 Attraction: Selection Proportion", x = NULL, y = NULL) +
+  labs(title = "(k)", x = NULL, y = NULL) +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1),
         axis.text.y = element_blank(), axis.ticks.y = element_blank(),
@@ -514,7 +546,7 @@ p_q14_sig <- q14_tests %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
   scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "Q14 Rewards: Group Differences", x = NULL, y = "Dimension") +
+  labs(title = "(l)", x = NULL, y = "Dimension") +
   pub_theme +
   theme(axis.text.x = element_blank(), panel.grid = element_blank())
 
@@ -531,7 +563,7 @@ p_q14_dist <- q14_freq %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
   scale_fill_gradient(low = "#A5D6A7", high = "#2E7D32", name = "Proportion") +
-  labs(title = "Q14 Desired Rewards: Distribution", x = NULL, y = NULL) +
+  labs(title = "(m)", x = NULL, y = NULL) +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1),
         axis.text.y = element_blank(), axis.ticks.y = element_blank(),
@@ -561,7 +593,7 @@ p_q15_sig <- q15_tests %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
   scale_fill_manual(values = c("TRUE" = "#FF7043", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "Q15 Barriers: Group Differences", x = NULL, y = "Dimension") +
+  labs(title = "(n)", x = NULL, y = "Dimension") +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
 
@@ -574,7 +606,7 @@ p_q15_prop <- q15_freq %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
   scale_fill_gradient(low = "#FFCCBC", high = "#D84315", name = "Proportion") +
-  labs(title = "Q15 Barriers: Selection Proportion", x = NULL, y = NULL) +
+  labs(title = "(o)", x = NULL, y = NULL) +
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1),
         axis.text.y = element_blank(), axis.ticks.y = element_blank(),
@@ -584,8 +616,7 @@ p_q15_prop <- q15_freq %>%
 # 5.4 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
   plot_layout(heights = c(1.2, 1.2, 1.2)) +
-  plot_annotation(title = "Multi-Select Questions: Attraction (Q13), Rewards (Q14), Barriers (Q15)",
-                  theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14)))
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = rel(1.1))))
 
 print(p_combined_q13q14q15)
 ggsave("data_proc/q13_q14_q15_combined.png", p_combined_q13q14q15, width = 28, height = 24, units = "cm", dpi = 300, bg = "white")
