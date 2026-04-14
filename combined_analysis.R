@@ -38,7 +38,7 @@ behavior_three <- list(
 demo_groups <- c(
   "gender" = "Gender",
   "age" = "Age",
-  "marital_status" = "Marital Status",
+  "marital" = "Marital",
   "education" = "Education"
 )
 
@@ -221,7 +221,7 @@ gender_map <- c("男" = "Male", "女" = "Female")
 # age_map <- c("18-25岁" = "18-25", "26-35岁" = "26-35", "36-45岁" = "36-45",
 #              "46-55岁" = "46-55", "56岁及以上" = "56+")
 marital_map <- c("已婚" = "Married", "独居" = "Single/Divorced/Widowed")
-demo_groups_edu <- c("gender" = "Gender", "age" = "Age", "marital_status" = "Marital Status", "education" = "Education")
+demo_groups_edu <- c("gender" = "Gender", "age" = "Age", "marital_status" = "Marital", "education" = "Education")
 
 behavior_by_group <- lapply(names(behavior_prepost), function(b) {
   lapply(names(demo_groups_edu), function(gvar) {
@@ -266,8 +266,7 @@ behavior_by_group <- lapply(names(behavior_prepost), function(b) {
 behavior_by_group <- behavior_by_group %>%
   mutate(grp_en = case_when(
     Dimension == "Gender" ~ gender_map[grp],
-    # Dimension == "Age" ~ age_map[grp],
-    Dimension == "Marital Status" ~ marital_map[grp],
+    Dimension == "Marital" ~ marital_map[grp],
     Dimension == "Education" ~ edu_map[grp],
     TRUE ~ grp
   ))
@@ -298,21 +297,21 @@ exp_print_fig <- function(fig_x, file_name_x, ...) {
 # 分群体统计比较结果热力图。
 exp_print_fig(
   behavior_by_group %>%
-    mutate(label_text = paste0(round(V_stat, 0), "\n", Within)) %>% 
+    mutate(label_text = paste0(round(V_stat, 0), "\n", Within)) %>%
     mutate(Behavior = factor(Behavior, levels = names(behavior_prepost)),
-           Dimension = factor(Dimension, levels = c("Gender", "Age", "Marital Status", "Education"))) %>%
-    ggplot(aes(x = grp_en, y = Behavior, fill = (Within != "ns" & Within != "NA"))) +
+           Dimension = factor(Dimension, levels = c("Gender", "Age", "Marital", "Education"))) %>%
+    ggplot(aes(x = Behavior, y = grp_en, fill = (Within != "ns" & Within != "NA"))) +
     geom_tile(color = "white", linewidth = 0.8) +
     geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
-    facet_grid(. ~ Dimension, scales = "free_x", space = "free_x") +
+    facet_grid(Dimension ~ ., scales = "free_y", space = "free_y") +
     scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-    labs(x = "Demographic Group", y = "Behavior") +
+    labs(x = "Behavior", y = "Demographic Group") +
     pub_theme +
-    theme(axis.text.x = element_text(hjust = 1, angle = 90, size = rel(0.8)),
+    theme(axis.text.x = element_text(hjust = 1, angle = 30, size = rel(0.8)),
           strip.text = element_text(face = "bold"),
-          panel.grid = element_blank()), 
-  "行为变化_分群体_热力图.png", 
-  width = 16, height = 15
+          panel.grid = element_blank()),
+  "行为变化_分群体_热力图.png",
+  width = 18, height = 14
 )
 
 # PART 3: 三组对比（使用前 vs 使用后 vs 非用户）
