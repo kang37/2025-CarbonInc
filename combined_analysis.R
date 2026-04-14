@@ -167,7 +167,6 @@ png(
 p_sankey
 dev.off()
 
-
 # PART 2: APP使用前后行为变化分析（整体+分群体）
 cat("\n\n", strrep("#", 80), "\n")
 cat("PART 2: Behavior Change Analysis\n")
@@ -176,36 +175,47 @@ cat(strrep("#", 80), "\n")
 app_users <- data %>% filter(q1_used_app == 1)
 
 # 2.1 整体描述性统计
-cat("\n--- 2.1 Descriptive Statistics (Overall) ---\n")
-lapply(names(behavior_prepost), function(b) {
-  app_users %>%
-    select(Pre = all_of(behavior_prepost[[b]][["pre"]]), Post = all_of(behavior_prepost[[b]][["post"]])) %>%
-    mutate(across(everything(), as.numeric)) %>%
-    pivot_longer(everything(), names_to = "Period", values_to = "Score") %>%
-    filter(!is.na(Score)) %>%
-    group_by(Period) %>%
-    summarise(N = n(), Mean = mean(Score), SD = sd(Score), Q1 = quantile(Score, 0.25),
-              Median = median(Score), Q3 = quantile(Score, 0.75), .groups = "drop") %>%
-    mutate(Behavior = b, Period = factor(ifelse(Period == "Pre", "Before", "After"), c("Before", "After")))
-}) %>% bind_rows() %>% arrange(Behavior, Period) %>%
-  select(Behavior, Period, N, Mean, SD, Q1, Median, Q3) %>% kable(digits = 2, format = "simple") %>% print()
+# 函数：导出表格并打印。
+exp_print_tbl <- function(tbl_x, exp_tbl_title_x) {
+  # 打印表格。
+  kable(tbl_x, digits = 2, format = "simple") %>% print()
+  # 导出结果。
+  write.csv(tbl_x, paste0("data_proc/", exp_tbl_title_x))
+}
+
+# 描述性统计。
+exp_print_tbl(
+  lapply(names(behavior_prepost), function(b) {
+    app_users %>%
+      select(Pre = all_of(behavior_prepost[[b]][["pre"]]), Post = all_of(behavior_prepost[[b]][["post"]])) %>%
+      mutate(across(everything(), as.numeric)) %>%
+      pivot_longer(everything(), names_to = "Period", values_to = "Score") %>%
+      filter(!is.na(Score)) %>%
+      group_by(Period) %>%
+      summarise(N = n(), Mean = mean(Score), SD = sd(Score), Q1 = quantile(Score, 0.25),
+                Median = median(Score), Q3 = quantile(Score, 0.75), .groups = "drop") %>%
+      mutate(Behavior = b, Period = factor(ifelse(Period == "Pre", "Before", "After"), c("Before", "After")))
+  }) %>% bind_rows() %>% arrange(Behavior, Period) %>%
+    select(Behavior, Period, N, Mean, SD, Q1, Median, Q3), 
+  "data_proc/使用前后行为描述性分析.csv"
+)
 
 # 2.2 整体Wilcoxon检验
-cat("\n--- 2.2 Wilcoxon Test (Overall) ---\n")
-lapply(names(behavior_prepost), function(b) {
-  d <- app_users %>%
-    select(Pre = all_of(behavior_prepost[[b]][["pre"]]), Post = all_of(behavior_prepost[[b]][["post"]])) %>%
-    mutate(across(everything(), as.numeric)) %>% filter(!is.na(Pre) & !is.na(Post)) %>%
-    mutate(Diff = Post - Pre)
-  test <- wilcox.test(d$Post, d$Pre, paired = TRUE, alternative = "greater", exact = FALSE)
-  data.frame(Behavior = b, N = nrow(d), Before = round(mean(d$Pre), 2), After = round(mean(d$Post), 2),
-             Diff = round(mean(d$Diff), 3), Cohen_d = round(mean(d$Diff)/sd(d$Diff), 3),
-             P_value = test$p.value, Sig = ifelse(test$p.value < 0.001, "***", ifelse(test$p.value < 0.01, "**", ifelse(test$p.value < 0.05, "*", "ns"))))
-}) %>% bind_rows() %>% mutate(P_value = format.pval(P_value, 3)) %>% kable(format = "simple") %>% print()
+exp_print_tbl(
+  lapply(names(behavior_prepost), function(b) {
+    d <- app_users %>%
+      select(Pre = all_of(behavior_prepost[[b]][["pre"]]), Post = all_of(behavior_prepost[[b]][["post"]])) %>%
+      mutate(across(everything(), as.numeric)) %>% filter(!is.na(Pre) & !is.na(Post)) %>%
+      mutate(Diff = Post - Pre)
+    test <- wilcox.test(d$Post, d$Pre, paired = TRUE, alternative = "greater", exact = FALSE)
+    data.frame(Behavior = b, N = nrow(d), Before = round(mean(d$Pre), 2), After = round(mean(d$Post), 2),
+               Diff = round(mean(d$Diff), 3), Cohen_d = round(mean(d$Diff)/sd(d$Diff), 3),
+               P_value = test$p.value, Sig = ifelse(test$p.value < 0.001, "***", ifelse(test$p.value < 0.01, "**", ifelse(test$p.value < 0.05, "*", "ns"))))
+  }) %>% bind_rows() %>% mutate(P_value = format.pval(P_value, 3)), 
+  "行为变化_整体.csv"
+)
 
 # 2.3 分群体分析
-cat("\n--- 2.3 Behavior Change by Groups ---\n")
-
 # 预处理：合并教育分组
 data_edu <- data %>%
   mutate(education_merged = case_when(
@@ -284,10 +294,7 @@ p1 <- behavior_by_group %>%
 print(p1)
 ggsave("data_proc/behavior_change_within_group.png", p1, width = 28, height = 16, units = "cm", dpi = 300, bg = "white")
 
-
-# ##############################################################################
 # PART 3: 三组对比（使用前 vs 使用后 vs 非用户）
-# ##############################################################################
 
 cat("\n\n", strrep("#", 80), "\n")
 cat("PART 3: Three-Group Comparison\n")
