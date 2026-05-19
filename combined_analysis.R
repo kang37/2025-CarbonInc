@@ -38,7 +38,7 @@ behavior_three <- list(
 demo_groups <- c(
   "gender" = "Gender",
   "age" = "Age",
-  "marital" = "Marital",
+  "marital_status" = "Marital",
   "education" = "Education"
 )
 
