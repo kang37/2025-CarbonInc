@@ -17,7 +17,7 @@ app_users <- data %>%
 # 行为变量映射（前后对比）
 behavior_prepost <- list(
   "Public Transit" = c(pre = "q16_pre_public_trans", post = "q18_change_public_trans"),
-  "Cycling/Walking" = c(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk"),
+  "Cycling or walking" = c(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk"),
   "Turn Off Power" = c(pre = "q16_pre_turn_off_power", post = "q18_change_turn_off_power"),
   "Garbage Sorting" = c(pre = "q16_pre_garbage_sort", post = "q18_change_garbage_sort"),
   "Reusable Bags" = c(pre = "q16_pre_reusable_bag", post = "q18_change_reusable_bag"),
@@ -27,7 +27,7 @@ behavior_prepost <- list(
 # 行为变量映射（三组对比：使用前、使用后、非用户）
 behavior_three <- list(
   "Public Transit" = list(pre = "q16_pre_public_trans", post = "q18_change_public_trans", non = "q17_usual_public_trans"),
-  "Cycling/Walking" = list(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk", non = "q17_usual_bike_walk"),
+  "Cycling or walking" = list(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk", non = "q17_usual_bike_walk"),
   "Turn Off Power" = list(pre = "q16_pre_turn_off_power", post = "q18_change_turn_off_power", non = "q17_usual_turn_off_power"),
   "Garbage Sorting" = list(pre = "q16_pre_garbage_sort", post = "q18_change_garbage_sort", non = "q17_usual_garbage_sort"),
   "Reusable Bags" = list(pre = "q16_pre_reusable_bag", post = "q18_change_reusable_bag", non = "q17_usual_reusable_bag"),
@@ -164,11 +164,207 @@ sankey_list[[length(sankey_list)]] <- sankey_list[[length(sankey_list)]] + theme
 p_sankey <- Reduce(`+`, sankey_list) + plot_layout(ncol = 2, guides = "collect")
 print(p_sankey)
 png(
-  "data_proc/sankey_behavior_change.png", 
+  "data_proc/sankey_behavior_change.png",
   width = 16, height = 20, units = "cm", res = 300
 )
 p_sankey
 dev.off()
+
+# PART 1.5: 详细的Sankey流向分析 ----
+cat("\n\n", strrep("#", 80), "\n")
+cat("PART 1.5: Detailed Sankey Flow Analysis\n")
+cat("(Left distribution, Right distribution, Flow-out %, Flow-in %)\n")
+cat(strrep("#", 80), "\n")
+
+# 函数：计算详细的流向统计
+calc_sankey_detailed <- function(data, pre_col, post_col, behavior_name) {
+
+  # 1. 清理数据
+  lvls <- as.character(1:5)
+  d <- data %>%
+    select(Pre = all_of(pre_col), Post = all_of(post_col)) %>%
+    mutate(
+      Pre = factor(as.character(as.numeric(Pre)), levels = lvls),
+      Post = factor(as.character(as.numeric(Post)), levels = lvls)
+    ) %>%
+    filter(!is.na(Pre) & !is.na(Post)) %>%
+    mutate(Pre = as.numeric(as.character(Pre)), Post = as.numeric(as.character(Post)))
+
+  # 2. 左边各节点占比
+  pre_dist <- d %>%
+    group_by(Pre) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    mutate(
+      Total = sum(Count),
+      Proportion = Count / Total,
+      Percent = sprintf("%.2f%%", Proportion * 100)
+    ) %>%
+    rename("Score" = Pre, "Pre_Count" = Count) %>%
+    select(Score, Pre_Count, Total, Proportion, Percent)
+
+  # 3. 右边各节点占比
+  post_dist <- d %>%
+    group_by(Post) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    mutate(
+      Total = sum(Count),
+      Proportion = Count / Total,
+      Percent = sprintf("%.2f%%", Proportion * 100)
+    ) %>%
+    rename("Score" = Post, "Post_Count" = Count) %>%
+    select(Score, Post_Count, Total, Proportion, Percent)
+
+  # 4. 流出百分比：左边每个节点流向右边各节点的比例
+  flow_out <- d %>%
+    group_by(Pre, Post) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Pre) %>%
+    mutate(
+      Total_Pre = sum(Count),
+      Flow_Proportion = Count / Total_Pre,
+      Flow_Percent = sprintf("%.2f%%", Flow_Proportion * 100)
+    ) %>%
+    rename("From_Score" = Pre, "To_Score" = Post) %>%
+    select(From_Score, To_Score, Count, Total_Pre, Flow_Proportion, Flow_Percent) %>%
+    arrange(From_Score, To_Score)
+
+  # 创建流出矩阵（5x5矩阵，行=From，列=To）
+  flow_out_matrix <- d %>%
+    group_by(Pre, Post) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Pre) %>%
+    mutate(Flow_Percent = sprintf("%.2f%%", Count / sum(Count) * 100)) %>%
+    select(Pre, Post, Flow_Percent) %>%
+    pivot_wider(names_from = Post, values_from = Flow_Percent, values_fill = "0.00%") %>%
+    rename("From" = Pre) %>%
+    # 确保所有分数都存在（1-5）
+    {
+      all_scores <- 1:5
+      missing_rows <- setdiff(all_scores, .$From)
+      if (length(missing_rows) > 0) {
+        missing_data <- data.frame(From = missing_rows)
+        for (col in setdiff(names(.), "From")) {
+          missing_data[[col]] <- "0.00%"
+        }
+        bind_rows(., missing_data)
+      } else {
+        .
+      }
+    } %>%
+    arrange(From) %>%
+    # 确保列的顺序是1-5
+    {
+      expected_cols <- c("From", as.character(1:5))
+      existing_cols <- names(.)
+      cols_to_keep <- intersect(expected_cols, existing_cols)
+      select(., all_of(cols_to_keep))
+    } %>%
+    as.data.frame()
+
+  # 5. 流入百分比：右边每个节点来自左边各节点的比例
+  flow_in <- d %>%
+    group_by(Pre, Post) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Post) %>%
+    mutate(
+      Total_Post = sum(Count),
+      Flow_Proportion = Count / Total_Post,
+      Flow_Percent = sprintf("%.2f%%", Flow_Proportion * 100)
+    ) %>%
+    rename("From_Score" = Pre, "To_Score" = Post) %>%
+    select(From_Score, To_Score, Count, Total_Post, Flow_Proportion, Flow_Percent) %>%
+    arrange(To_Score, From_Score)
+
+  # 创建流入矩阵（5x5矩阵，行=To，列=From）
+  flow_in_matrix <- d %>%
+    group_by(Pre, Post) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Post) %>%
+    mutate(Flow_Percent = sprintf("%.2f%%", Count / sum(Count) * 100)) %>%
+    select(Pre, Post, Flow_Percent) %>%
+    pivot_wider(names_from = Pre, values_from = Flow_Percent, values_fill = "0.00%") %>%
+    rename("To" = Post) %>%
+    # 确保所有分数都存在（1-5）
+    {
+      all_scores <- 1:5
+      missing_rows <- setdiff(all_scores, .$To)
+      if (length(missing_rows) > 0) {
+        missing_data <- data.frame(To = missing_rows)
+        for (col in setdiff(names(.), "To")) {
+          missing_data[[col]] <- "0.00%"
+        }
+        bind_rows(., missing_data)
+      } else {
+        .
+      }
+    } %>%
+    arrange(To) %>%
+    # 确保列的顺序是1-5
+    {
+      expected_cols <- c("To", as.character(1:5))
+      existing_cols <- names(.)
+      cols_to_keep <- intersect(expected_cols, existing_cols)
+      select(., all_of(cols_to_keep))
+    } %>%
+    as.data.frame()
+
+  # 计算从低频(1-3)转化到高频(4-5)的人数
+  conversion_count <- sum((d$Pre <= 3 & d$Post >= 4))
+
+  # 返回包含所有统计的列表
+  return(list(
+    behavior = behavior_name,
+    n_total = nrow(d),
+    conversion_low_to_high = conversion_count,
+    pre_distribution = pre_dist,
+    post_distribution = post_dist,
+    flow_out_table = flow_out,
+    flow_out_matrix = flow_out_matrix,
+    flow_in_table = flow_in,
+    flow_in_matrix = flow_in_matrix
+  ))
+}
+
+# 为所有行为变量计算详细统计
+cat("\nCalculating detailed Sankey analysis for all behaviors...\n")
+sankey_detailed_list <- lapply(names(behavior_prepost), function(b) {
+  cat("  -", b, "\n")
+  calc_sankey_detailed(
+    app_users,
+    behavior_prepost[[b]][["pre"]],
+    behavior_prepost[[b]][["post"]],
+    b
+  )
+})
+
+# 给列表添加名称，方便按行为名称访问
+names(sankey_detailed_list) <- names(behavior_prepost)
+
+cat("\n✓ Detailed analysis complete!\n")
+cat("\nAccess results using: sankey_detailed_list$'Behavior Name'\n")
+
+# 打印每个行为的摘要
+print_sankey_summary <- function(result) {
+  cat("\n", strrep("-", 80), "\n")
+  cat("Behavior:", result$behavior, "\n")
+  cat("Total respondents (with valid pre & post):", result$n_total, "\n")
+  cat(strrep("-", 80), "\n")
+
+  cat("\n[1] LEFT SIDE (BEFORE) DISTRIBUTION:\n")
+  print(knitr::kable(result$pre_distribution, format = "simple"))
+
+  cat("\n[2] RIGHT SIDE (AFTER) DISTRIBUTION:\n")
+  print(knitr::kable(result$post_distribution, format = "simple"))
+
+  cat("\n[3] FLOW OUT MATRIX (% of 'From' that flows to each 'To'):\n")
+  print(knitr::kable(result$flow_out_matrix, format = "simple"))
+
+  cat("\n[4] FLOW IN MATRIX (% of 'To' that comes from each 'From'):\n")
+  print(knitr::kable(result$flow_in_matrix, format = "simple"))
+}
+
+# 打印所有行为的详细摘要
+invisible(lapply(sankey_detailed_list, print_sankey_summary))
 
 ## APP使用前后行为变化 ----
 ### 整体分析 ----
@@ -656,10 +852,96 @@ print(p_combined_q13q14q15)
 ggsave("data_proc/q13_q14_q15_combined.png", p_combined_q13q14q15, width = 28, height = 24, units = "cm", dpi = 300, bg = "white")
 
 
+# PART 6: 导出Sankey详细分析为Excel ----
+cat("\n\n", strrep("#", 80), "\n")
+cat("PART 6: Exporting Detailed Sankey Analysis to Excel\n")
+cat(strrep("#", 80), "\n")
+
+# 导出到Excel的函数
+export_sankey_to_excel <- function(sankey_list, filename = "data_proc/sankey_detailed_analysis.xlsx") {
+
+  pacman::p_load(openxlsx)
+
+  # 创建工作簿
+  wb <- createWorkbook()
+
+  # 为每个行为创建一个sheet
+  for (behavior_name in names(sankey_list)) {
+    result <- sankey_list[[behavior_name]]
+
+    # 创建sheet
+    sheet_name <- substr(behavior_name, 1, 31)  # Excel sheet名称最多31个字符
+    addWorksheet(wb, sheet_name)
+    print(sheet_name)
+
+    # 当前行位置
+    current_row <- 1
+
+    # 写入标题
+    writeData(wb, sheet_name, "Sankey Detailed Analysis", startRow = current_row)
+    current_row <- current_row + 1
+
+    writeData(wb, sheet_name, paste("Behavior:", behavior_name), startRow = current_row)
+    current_row <- current_row + 1
+
+    writeData(wb, sheet_name, paste("Total respondents (with valid pre & post):", result$n_total), startRow = current_row)
+    current_row <- current_row + 2
+
+    # 表格1：左边分布
+    writeData(wb, sheet_name, "[1] LEFT SIDE (BEFORE) DISTRIBUTION:", startRow = current_row)
+    current_row <- current_row + 1
+    writeData(wb, sheet_name, result$pre_distribution, startRow = current_row, rowNames = FALSE)
+    current_row <- current_row + nrow(result$pre_distribution) + 3
+
+    # 表格2：右边分布
+    writeData(wb, sheet_name, "[2] RIGHT SIDE (AFTER) DISTRIBUTION:", startRow = current_row)
+    current_row <- current_row + 1
+    writeData(wb, sheet_name, result$post_distribution, startRow = current_row, rowNames = FALSE)
+    current_row <- current_row + nrow(result$post_distribution) + 3
+
+    # 表格3：流出矩阵
+    writeData(wb, sheet_name, "[3] FLOW OUT MATRIX (% of 'From' that flows to each 'To'):", startRow = current_row)
+    current_row <- current_row + 1
+    writeData(wb, sheet_name, result$flow_out_matrix, startRow = current_row, rowNames = FALSE)
+    current_row <- current_row + nrow(result$flow_out_matrix) + 3
+
+    # 表格4：流入矩阵
+    writeData(wb, sheet_name, "[4] FLOW IN MATRIX (% of 'To' that comes from each 'From'):", startRow = current_row)
+    current_row <- current_row + 1
+    writeData(wb, sheet_name, result$flow_in_matrix, startRow = current_row, rowNames = FALSE)
+
+    # 设置列宽
+    setColWidths(wb, sheet_name, cols = 1:20, widths = "auto")
+  }
+
+  # 创建汇总sheet
+  addWorksheet(wb, "Summary")
+  summary_data <- data.frame(
+    Behavior = names(sankey_list),
+    N_Total = sapply(sankey_list, function(x) x$n_total),
+    Converted_1_3_to_4_5 = sapply(sankey_list, function(x) x$conversion_low_to_high),
+    stringsAsFactors = FALSE
+  )
+  writeData(wb, "Summary", "Sankey Analysis Summary", startRow = 1)
+  writeData(wb, "Summary", summary_data, startRow = 3, rowNames = FALSE)
+  setColWidths(wb, "Summary", cols = 1:3, widths = "auto")
+
+  # 保存文件
+  saveWorkbook(wb, filename, overwrite = TRUE)
+  cat("✓ Excel file exported successfully!\n")
+  cat("  Location:", filename, "\n")
+  cat("  Sheets created:", length(names(sankey_list)) + 1, "\n")
+  cat("  - Summary sheet + ", length(names(sankey_list)), " behavior sheets\n", sep = "")
+}
+
+# 执行导出
+export_sankey_to_excel(sankey_detailed_list)
+
 # ==============================================================================
 cat("\n\n", strrep("=", 80), "\n")
 cat("Analysis complete. Output files saved to data_proc/ directory:\n")
 cat("  - sankey_behavior_change.png\n")
+cat("  - sankey_detailed_analysis.xlsx (NEW!)\n")
 cat("  - behavior_change_within_group.png\n")
 cat("  - three_group_comparison_table.csv\n")
 cat("  - three_group_significance.png\n")
