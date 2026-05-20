@@ -2,7 +2,7 @@
 # 包含：桑基图、行为变化分析、三组对比、Q4/Q20感知分析、Q13/Q14/Q15多选题分析
 
 # 载入包。
-pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext)
+pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext, stringr)
 showtext_auto()
 
 # Bug: data来自report.r
@@ -578,8 +578,28 @@ three_pairwise %>% mutate(p_raw = format.pval(p_raw, 3), p_adj = format.pval(p_a
   select(Behavior, Comparison, W_stat, p_raw, p_adj, Sig) %>% kable(format = "simple") %>% print()
 
 # 保存表格
-write.csv(three_pairwise %>% mutate(p_raw = format.pval(p_raw, 3), p_adj = format.pval(p_adj, 3), W_stat = round(W_stat, 0)) %>%
-            select(Behavior, Comparison, W_stat, p_raw, p_adj, Sig),
+write.csv(three_pairwise %>%
+            mutate(
+              # 行为名称大小写转换
+              Behavior = case_when(
+                Behavior == "Public Transit" ~ "Public transportation",
+                Behavior == "Cycling or walking" ~ "Cycling or walking",
+                Behavior == "Turn Off Power" ~ "Turn off power",
+                Behavior == "Garbage Sorting" ~ "Garbage sorting",
+                Behavior == "Reusable Bags" ~ "Reusable bags",
+                Behavior == "Energy-Efficient Products" ~ "Energy-efficient products",
+                TRUE ~ Behavior
+              ),
+              # Comparison中的"Non-User"改为"Non-user"
+              Comparison = str_replace(Comparison, "Non-User", "Non-user"),
+              # 数值转换
+              p_raw = format.pval(p_raw, 3),
+              p_adj = format.pval(p_adj, 3),
+              W_stat = round(W_stat, 0),
+              # 创建新列：W_stat_Sig（例如"15271**"）
+              W_stat_Sig = paste0(W_stat, Sig)
+            ) %>%
+            select(Behavior, Comparison, W_stat, Sig, W_stat_Sig, p_raw, p_adj),
           "data_proc/three_group_comparison_table.csv", row.names = FALSE)
 
 # 3.3 热图
