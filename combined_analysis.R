@@ -602,6 +602,40 @@ write.csv(three_pairwise %>%
             select(Behavior, Comparison, W_stat, Sig, W_stat_Sig, p_raw, p_adj),
           "data_proc/three_group_comparison_table.csv", row.names = FALSE)
 
+# 创建article版本的三组对比表格（每行一个行为）
+three_pairwise_article <- three_pairwise %>%
+  mutate(
+    # 行为名称标准化
+    Behavior = case_when(
+      Behavior == "Public Transit" ~ "Public transportation",
+      Behavior == "Cycling or walking" ~ "Cycling or walking",
+      Behavior == "Turn Off Power" ~ "Turn off power",
+      Behavior == "Garbage Sorting" ~ "Garbage sorting",
+      Behavior == "Reusable Bags" ~ "Reusable bags",
+      Behavior == "Energy-Efficient Products" ~ "Energy-efficient products",
+      TRUE ~ Behavior
+    ),
+    # Comparison标准化
+    Comparison = str_replace(Comparison, "Non-User", "Non-user"),
+    # W_stat_Sig列
+    W_stat_Sig = paste0(round(W_stat, 0),
+                        case_when(is.na(p_adj) ~ "NA",
+                                  p_adj < 0.001 ~ "***",
+                                  p_adj < 0.01 ~ "**",
+                                  p_adj < 0.05 ~ "*",
+                                  TRUE ~ "ns"))
+  ) %>%
+  select(Behavior, Comparison, W_stat_Sig) %>%
+  pivot_wider(
+    names_from = Comparison,
+    values_from = W_stat_Sig,
+    names_sort = TRUE
+  ) %>%
+  # 确保列的顺序
+  select(Behavior, `Before vs After`, `Before vs Non-user`, `After vs Non-user`)
+
+write.csv(three_pairwise_article, "data_proc/three_group_comparison_table_article.csv", row.names = FALSE)
+
 # 3.3 热图
 exp_print_fig(
   three_pairwise %>%
