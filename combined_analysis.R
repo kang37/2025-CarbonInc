@@ -16,7 +16,7 @@ app_users <- data %>%
 # 全局配置 ----
 # 行为变量映射（前后对比）
 behavior_prepost <- list(
-  "Public Transit" = c(pre = "q16_pre_public_trans", post = "q18_change_public_trans"),
+  "Public Transportation" = c(pre = "q16_pre_public_trans", post = "q18_change_public_trans"),
   "Cycling or walking" = c(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk"),
   "Turn Off Power" = c(pre = "q16_pre_turn_off_power", post = "q18_change_turn_off_power"),
   "Garbage Sorting" = c(pre = "q16_pre_garbage_sort", post = "q18_change_garbage_sort"),
@@ -26,7 +26,7 @@ behavior_prepost <- list(
 
 # 行为变量映射（三组对比：使用前、使用后、非用户）
 behavior_three <- list(
-  "Public Transit" = list(pre = "q16_pre_public_trans", post = "q18_change_public_trans", non = "q17_usual_public_trans"),
+  "Public Transportation" = list(pre = "q16_pre_public_trans", post = "q18_change_public_trans", non = "q17_usual_public_trans"),
   "Cycling or walking" = list(pre = "q16_pre_bike_walk", post = "q18_change_bike_walk", non = "q17_usual_bike_walk"),
   "Turn Off Power" = list(pre = "q16_pre_turn_off_power", post = "q18_change_turn_off_power", non = "q17_usual_turn_off_power"),
   "Garbage Sorting" = list(pre = "q16_pre_garbage_sort", post = "q18_change_garbage_sort", non = "q17_usual_garbage_sort"),
@@ -536,6 +536,30 @@ exp_print_fig(
   width = 18, height = 14
 )
 
+# 新增：分群体行为均值热力图
+exp_print_fig(
+  behavior_by_group %>%
+    mutate(Behavior = factor(Behavior, levels = names(behavior_prepost)),
+           Dimension = factor(Dimension, levels = c("Gender", "Age", "Marital", "Education"))) %>%
+    ggplot(aes(x = Behavior, y = grp_en, fill = Post_Mean)) +
+    geom_tile(color = "white", linewidth = 0.8) +
+    geom_text(aes(label = round(Post_Mean, 2)), size = 3, color = "black") +
+    facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
+    scale_fill_viridis_c(
+      name = "Mean Score",
+      breaks = c(1, 2, 3, 4, 5),
+      limits = c(1, 5),
+      option = "plasma"
+    ) +
+    labs(x = "Behavior", y = "Demographic Group", title = "Behavior Change by Demographic Group (Post-Adoption Mean Scores)") +
+    pub_theme +
+    theme(axis.text.x = element_text(hjust = 1, angle = 30, size = rel(0.8)),
+          strip.text = element_text(face = "bold"),
+          panel.grid = element_blank()),
+  "行为变化_分群体_均值热力图.png",
+  width = 18, height = 16
+)
+
 # PART 3: 三组对比（使用前 vs 使用后 vs 非用户）
 three_levels <- c("Before", "After", "Non-User")
 
@@ -582,7 +606,7 @@ write.csv(three_pairwise %>%
             mutate(
               # 行为名称大小写转换
               Behavior = case_when(
-                Behavior == "Public Transit" ~ "Public transportation",
+                Behavior == "Public Transportation" ~ "Public transportation",
                 Behavior == "Cycling or walking" ~ "Cycling or walking",
                 Behavior == "Turn Off Power" ~ "Turn off power",
                 Behavior == "Garbage Sorting" ~ "Garbage sorting",
@@ -607,7 +631,7 @@ three_pairwise_article <- three_pairwise %>%
   mutate(
     # 行为名称标准化
     Behavior = case_when(
-      Behavior == "Public Transit" ~ "Public transportation",
+      Behavior == "Public Transportation" ~ "Public transportation",
       Behavior == "Cycling or walking" ~ "Cycling or walking",
       Behavior == "Turn Off Power" ~ "Turn off power",
       Behavior == "Garbage Sorting" ~ "Garbage sorting",
@@ -623,16 +647,25 @@ three_pairwise_article <- three_pairwise %>%
                                   p_adj < 0.001 ~ "***",
                                   p_adj < 0.01 ~ "**",
                                   p_adj < 0.05 ~ "*",
-                                  TRUE ~ "ns"))
+                                  TRUE ~ "ns")),
+    # 行为因子化以保持顺序
+    Behavior = factor(Behavior, levels = c("Public transportation", "Cycling or walking",
+                                           "Turn off power", "Garbage sorting",
+                                           "Reusable bags", "Energy-efficient products"))
   ) %>%
   select(Behavior, Comparison, W_stat_Sig) %>%
   pivot_wider(
     names_from = Comparison,
     values_from = W_stat_Sig,
-    names_sort = TRUE
+    names_sort = FALSE
   ) %>%
-  # 确保列的顺序
-  select(Behavior, `Before vs After`, `Before vs Non-user`, `After vs Non-user`)
+  # 重新排列列的顺序
+  select(Behavior, `Before vs After`, `Before vs Non-user`, `After vs Non-user`) %>%
+  # 转换Behavior为字符（保持因子排序）
+  mutate(Behavior = as.character(Behavior)) %>%
+  arrange(match(Behavior, c("Public transportation", "Cycling or walking",
+                            "Turn off power", "Garbage sorting",
+                            "Reusable bags", "Energy-efficient products")))
 
 write.csv(three_pairwise_article, "data_proc/three_group_comparison_table_article.csv", row.names = FALSE)
 
