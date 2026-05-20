@@ -311,11 +311,37 @@ calc_sankey_detailed <- function(data, pre_col, post_col, behavior_name) {
   # 计算从低频(1-3)转化到高频(4-5)的人数
   conversion_count <- sum((d$Pre <= 3 & d$Post >= 4))
 
+  # 计算高频用户占比的变化
+  pre_high_pct <- sum(d$Pre >= 4) / nrow(d)
+  post_high_pct <- sum(d$Post >= 4) / nrow(d)
+  high_pct_change <- post_high_pct - pre_high_pct
+
+  # 计算从分数3转化到4或5的比例
+  mid_users <- sum(d$Pre == 3)
+  if (mid_users > 0) {
+    mid_to_high_conversion <- sum((d$Pre == 3 & d$Post >= 4)) / mid_users
+  } else {
+    mid_to_high_conversion <- NA
+  }
+
+  # 计算从分数1或2转化到3、4或5的比例
+  low_users <- sum(d$Pre <= 2)
+  if (low_users > 0) {
+    low_to_mid_high_conversion <- sum((d$Pre <= 2 & d$Post >= 3)) / low_users
+  } else {
+    low_to_mid_high_conversion <- NA
+  }
+
   # 返回包含所有统计的列表
   return(list(
     behavior = behavior_name,
     n_total = nrow(d),
     conversion_low_to_high = conversion_count,
+    pre_high_pct = pre_high_pct,
+    post_high_pct = post_high_pct,
+    high_pct_change = high_pct_change,
+    mid_to_high_conversion = mid_to_high_conversion,
+    low_to_mid_high_conversion = low_to_mid_high_conversion,
     pre_distribution = pre_dist,
     post_distribution = post_dist,
     flow_out_table = flow_out,
@@ -919,12 +945,19 @@ export_sankey_to_excel <- function(sankey_list, filename = "data_proc/sankey_det
   summary_data <- data.frame(
     Behavior = names(sankey_list),
     N_Total = sapply(sankey_list, function(x) x$n_total),
-    Converted_1_3_to_4_5 = sapply(sankey_list, function(x) x$conversion_low_to_high),
+    Converted_1_3_to_4_5 = sapply(
+      sankey_list, function(x) x$conversion_low_to_high
+    ),
+    Before_High_Freq_Pct = sprintf("%.2f%%", sapply(sankey_list, function(x) x$pre_high_pct * 100)),
+    After_High_Freq_Pct = sprintf("%.2f%%", sapply(sankey_list, function(x) x$post_high_pct * 100)),
+    High_Freq_Change_Pct = sprintf("%+.2f%%", sapply(sankey_list, function(x) x$high_pct_change * 100)),
+    Score3_to_4_5_Rate = sprintf("%.2f%%", sapply(sankey_list, function(x) ifelse(is.na(x$mid_to_high_conversion), 0, x$mid_to_high_conversion) * 100)),
+    Score1_2_to_3_5_Rate = sprintf("%.2f%%", sapply(sankey_list, function(x) ifelse(is.na(x$low_to_mid_high_conversion), 0, x$low_to_mid_high_conversion) * 100)),
     stringsAsFactors = FALSE
   )
   writeData(wb, "Summary", "Sankey Analysis Summary", startRow = 1)
   writeData(wb, "Summary", summary_data, startRow = 3, rowNames = FALSE)
-  setColWidths(wb, "Summary", cols = 1:3, widths = "auto")
+  setColWidths(wb, "Summary", cols = 1:8, widths = "auto")
 
   # 保存文件
   saveWorkbook(wb, filename, overwrite = TRUE)
