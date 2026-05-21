@@ -125,18 +125,21 @@ data <- left_join(
   by = "id"
 ) %>% 
   mutate(
+    gender = case_when(gender == "女" ~ "female", gender == "男" ~ "male"), 
     age = case_when(
-      age %in% c("<18岁", "18–25岁", "26–30岁") ~ "<30", 
+      age %in% c("<18岁", "18–25岁", "26–30岁") ~ "≤30", 
       age %in% c("31–40岁", "41–50岁") ~ "31-50", 
       age %in% c("≥51岁") ~ "≥51"
     ), 
     education = case_when(
-      education %in% c("初中及以下", "高中/技校") ~ "高中及以下", 
-      TRUE ~ education
+      education %in% c("初中及以下", "高中/技校", "大专") ~ "Below Bachelor", 
+      education == "本科" ~ "Bachelor", 
+      education == "硕士或博士" ~ "Master's or Doctoral"
     ), 
     marital_status = case_when(
-      marital_status %in% c("其他〖分居〗", "离婚", "未婚") ~ "独居", 
-      marital_status == "已婚" ~ "已婚"
+      marital_status %in% c("其他〖分居〗", "离婚", "未婚") ~ 
+        "Single/Divorced/Widowed", 
+      marital_status == "已婚" ~ "Married"
     ), 
     monthly_income_personal = case_when(
       monthly_income_personal %in% c("≤2000", "2000–4000", "4000–6000") ~ 
@@ -651,8 +654,6 @@ exp_print_tbl(
 # 教育分组英文映射
 edu_map <- c("大专或以下" = "Below Bachelor", "本科" = "Bachelor", "硕士或博士" = "Master's or Doctoral")
 gender_map <- c("男" = "Male", "女" = "Female")
-# age_map <- c("18-25岁" = "18-25", "26-35岁" = "26-35", "36-45岁" = "36-45",
-#              "46-55岁" = "46-55", "56岁及以上" = "56+")
 marital_map <- c("已婚" = "Married", "独居" = "Single/Divorced/Widowed")
 demo_groups_edu <- c("gender" = "Gender", "age" = "Age", "marital_status" = "Marital", "education" = "Education")
 
@@ -1045,7 +1046,7 @@ q13_tests <- q13_by_group %>% select(Dimension, Option, p.value, stat) %>% disti
 p_q13_sig <- q13_tests %>%
   ggplot(aes(x = Option, y = Dimension, fill = (Sig != "ns" & Sig != "NA"))) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = label_text), size = 4, lineheight = 0.85) +
+  geom_text(aes(label = label_text), size = 15) +
   scale_fill_manual(values = c("TRUE" = "darkgreen", "FALSE" = "#E0E0E0"), guide = "none") +
   labs(title = "(a)", x = NULL, y = "Dimension") +
   pub_theme + 
@@ -1069,13 +1070,13 @@ q13_prop_by_group <- q13_by_group %>%
 p_q13_prop <- q13_prop_by_group %>%
   ggplot(aes(x = Option, y = grp, fill = Proportion)) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 3.5, color = "white", fontface = "bold") +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 15, color = "white", fontface = "bold") +
   facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
   scale_fill_gradient(low = "lightgreen", high = "darkgreen", name = "Proportion") +
   labs(title = "(b)", x = NULL, y = "Group") +
   pub_theme +
   theme(
-    text = element_text(size = 60), 
+    text = element_text(size = 80), 
     panel.grid = element_blank(), 
     axis.text.x = element_text(angle = 90)
   )
@@ -1185,12 +1186,9 @@ p_q15_prop <- q15_freq %>%
 # 5.4 单独导出Q13图（Significance + Heatmap）
 p_q13_combined <- (p_q13_sig / p_q13_prop) +
   plot_layout(heights = c(1, 2.5)) +
-  plot_annotation(
-    title = "Q13: Attraction Factors",
-    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 50))
-  )
+  plot_annotation(title = "Q13: Attraction Factors")
 
-ggsave("data_proc/q13_attract_significance_heatmap.png", p_q13_combined, width = 24, height = 40, units = "cm", dpi = 300, bg = "white")
+ggsave("data_proc/q13_attract_significance_heatmap.png", p_q13_combined, width = 30, height = 40, units = "cm", dpi = 300, bg = "white")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
