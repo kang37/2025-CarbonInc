@@ -1040,7 +1040,8 @@ q13_by_group <- lapply(names(demo_groups_app), function(gvar) {
 
 q13_tests <- q13_by_group %>% select(Dimension, Option, p.value, stat) %>% distinct() %>%
   mutate(Sig = case_when(is.na(p.value) ~ "NA", p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*", TRUE ~ "ns"),
-         Dimension = factor(Dimension, demo_groups_app), Option = factor(Option, q13_attract),
+         Dimension = factor(Dimension, levels = c("Gender", "Age", "Education", "Marital", "APP Usage")),
+         Option = factor(Option, q13_attract),
          label_text = ifelse(is.na(stat), Sig, paste0("X2=", round(stat, 1), "\n", Sig)))
 
 p_q13_sig <- q13_tests %>%
@@ -1048,11 +1049,12 @@ p_q13_sig <- q13_tests %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 15) +
   scale_fill_manual(values = c("TRUE" = "darkgreen", "FALSE" = "#E0E0E0"), guide = "none") +
+  scale_y_discrete(limits = rev(levels(q13_tests$Dimension))) +
   labs(title = "(a)", x = NULL, y = "Dimension") +
-  pub_theme + 
+  pub_theme +
   theme(
-    text = element_text(size = 60), 
-    panel.grid = element_blank(), 
+    text = element_text(size = 60),
+    panel.grid = element_blank(),
     axis.text.x = element_text(angle = 90)
   ) 
   
@@ -1063,7 +1065,7 @@ q13_prop_by_group <- q13_by_group %>%
   distinct() %>%
   mutate(
     Option = factor(Option, q13_attract),
-    Dimension = factor(Dimension, demo_groups_app),
+    Dimension = factor(Dimension, levels = c("Gender", "Age", "Education", "Marital", "APP Usage")),
     grp = factor(grp, levels = sort(unique(grp)))  # 按字母顺序排列群体
   )
 
@@ -1189,6 +1191,15 @@ p_q13_combined <- (p_q13_sig / p_q13_prop) +
   plot_annotation(title = "Q13: Attraction Factors")
 
 ggsave("data_proc/q13_attract_significance_heatmap.png", p_q13_combined, width = 30, height = 40, units = "cm", dpi = 300, bg = "white")
+
+# 导出Q13数据表格
+# 表1：显著性检验数据（p_q13_sig对应的数据）
+write.csv(q13_tests, "data_proc/q13_attract_significance_data.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q13_attract_significance_data.csv\n")
+
+# 表2：比例数据（p_q13_prop对应的数据）
+write.csv(q13_prop_by_group, "data_proc/q13_attract_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q13_attract_proportion_by_group.csv\n")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
