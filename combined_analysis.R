@@ -833,26 +833,45 @@ q13_tests <- q13_by_group %>% select(Dimension, Option, p.value, stat) %>% disti
 p_q13_sig <- q13_tests %>%
   ggplot(aes(x = Option, y = Dimension, fill = (Sig != "ns" & Sig != "NA"))) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
+  geom_text(aes(label = label_text), size = 4, lineheight = 0.85) +
   scale_fill_manual(values = c("TRUE" = "#2196F3", "FALSE" = "#E0E0E0"), guide = "none") +
   labs(title = "(j)", x = NULL, y = "Dimension") +
   pub_theme +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
+  theme(
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    panel.grid = element_blank()
+  )
 
-# Q13 比例热图
-q13_freq <- calc_multi_freq(data, q13_attract) %>%
-  mutate(Option = factor(Option, q13_attract))
+# Q13 比例热图 - 按群体分组
+q13_prop_by_group <- q13_by_group %>%
+  select(Option, Dimension, grp, Proportion) %>%
+  distinct() %>%
+  mutate(
+    Option = factor(Option, q13_attract),
+    Dimension = factor(Dimension, demo_groups_app),
+    grp = factor(grp, levels = sort(unique(grp)))  # 按字母顺序排列群体
+  )
 
-p_q13_prop <- q13_freq %>%
-  ggplot(aes(x = Option, y = 1, fill = Proportion)) +
+p_q13_prop <- q13_prop_by_group %>%
+  ggplot(aes(x = Option, y = grp, fill = Proportion)) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 3.5, color = "white", fontface = "bold") +
+  facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
   scale_fill_gradient(low = "#90CAF9", high = "#1565C0", name = "Proportion") +
-  labs(title = "(k)", x = NULL, y = NULL) +
+  labs(title = "(k) Attraction Factors by Group", x = NULL, y = "Group") +
   pub_theme +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1),
-        axis.text.y = element_blank(), axis.ticks.y = element_blank(),
-        panel.grid = element_blank(), legend.key.height = unit(0.8, "cm"))
+  theme(
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    panel.grid = element_blank(),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12),
+    legend.key.height = unit(0.8, "cm"),
+    strip.text = element_text(size = 14, face = "bold")
+  )
 
 
 # 5.2 Q14 期望奖励
@@ -956,7 +975,18 @@ p_q15_prop <- q15_freq %>%
         panel.grid = element_blank(), legend.key.height = unit(0.8, "cm"))
 
 
-# 5.4 Q13/Q14/Q15 组合图 (3x2)
+# 5.4 单独导出Q13图（Significance + Heatmap）
+p_q13_combined <- (p_q13_sig / p_q13_prop) +
+  plot_layout(heights = c(1, 2.5)) +
+  plot_annotation(
+    title = "Q13: Attraction Factors - Significance Test and Proportion by Group",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 18))
+  )
+
+print(p_q13_combined)
+ggsave("data_proc/q13_attract_significance_heatmap.png", p_q13_combined, width = 24, height = 40, units = "cm", dpi = 300, bg = "white")
+
+# 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
   plot_layout(heights = c(1.2, 1.2, 1.2)) +
   plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = rel(1.1))))
