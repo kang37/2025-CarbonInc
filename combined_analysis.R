@@ -93,7 +93,7 @@ pub_theme <- theme_bw(base_size = 18, base_family = "serif") +
     panel.grid.minor = element_blank(),
     panel.grid.major = element_line(color = "grey92"),
     legend.title = element_text(face = "bold", size = rel(0.8)),
-    legend.text = element_text(size = rel(0.7)),
+    legend.text = element_text(size = 13),
     legend.key.size = unit(0.5, "cm"),
     strip.background = element_rect(fill = "grey95"),
     strip.text = element_text(face = "bold", size = rel(0.8))
@@ -834,15 +834,15 @@ p_q13_sig <- q13_tests %>%
   ggplot(aes(x = Option, y = Dimension, fill = (Sig != "ns" & Sig != "NA"))) +
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = label_text), size = 4, lineheight = 0.85) +
-  scale_fill_manual(values = c("TRUE" = "#2196F3", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "(j)", x = NULL, y = "Dimension") +
-  pub_theme +
+  scale_fill_manual(values = c("TRUE" = "darkgreen", "FALSE" = "#E0E0E0"), guide = "none") +
+  labs(title = "(a)", x = NULL, y = "Dimension") +
+  pub_theme + 
   theme(
-    axis.title.y = element_text(size = 16, face = "bold"),
-    axis.text.x = element_text(angle = 30, hjust = 1, size = 13),
-    axis.text.y = element_text(size = 13),
-    panel.grid = element_blank()
-  )
+    text = element_text(size = 60), 
+    panel.grid = element_blank(), 
+    axis.text.x = element_text(angle = 90)
+  ) 
+  
 
 # Q13 比例热图 - 按群体分组
 q13_prop_by_group <- q13_by_group %>%
@@ -859,18 +859,13 @@ p_q13_prop <- q13_prop_by_group %>%
   geom_tile(color = "white", linewidth = 0.8) +
   geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 3.5, color = "white", fontface = "bold") +
   facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
-  scale_fill_gradient(low = "#90CAF9", high = "#1565C0", name = "Proportion") +
-  labs(title = "(k) Attraction Factors by Group", x = NULL, y = "Group") +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen", name = "Proportion") +
+  labs(title = "(b)", x = NULL, y = "Group") +
   pub_theme +
   theme(
-    axis.title.y = element_text(size = 16, face = "bold"),
-    axis.text.x = element_text(angle = 30, hjust = 1, size = 13),
-    axis.text.y = element_text(size = 13),
-    panel.grid = element_blank(),
-    legend.title = element_text(size = 14, face = "bold"),
-    legend.text = element_text(size = 12),
-    legend.key.height = unit(0.8, "cm"),
-    strip.text = element_text(size = 14, face = "bold")
+    text = element_text(size = 60), 
+    panel.grid = element_blank(), 
+    axis.text.x = element_text(angle = 90)
   )
 
 
@@ -979,11 +974,10 @@ p_q15_prop <- q15_freq %>%
 p_q13_combined <- (p_q13_sig / p_q13_prop) +
   plot_layout(heights = c(1, 2.5)) +
   plot_annotation(
-    title = "Q13: Attraction Factors - Significance Test and Proportion by Group",
-    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 18))
+    title = "Q13: Attraction Factors",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 50))
   )
 
-print(p_q13_combined)
 ggsave("data_proc/q13_attract_significance_heatmap.png", p_q13_combined, width = 24, height = 40, units = "cm", dpi = 300, bg = "white")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
