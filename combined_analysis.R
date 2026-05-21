@@ -1089,15 +1089,20 @@ cat("\n--- 5.2 Q14 Desired Rewards ---\n")
 
 # 奖励类型英文映射
 reward_map <- c(
-  "现金红包/购物券等实际货币奖励" = "Cash/Vouchers",
-  "碳积分可兑换的实用商品或优惠" = "Redeemable Goods",
-  "公共服务优先权或折扣" = "Public Service Priority",
-  "精神荣誉奖励" = "Honorary Rewards",
-  "社交分享或公益捐赠奖励" = "Social/Charity Rewards"
+  "1" = "Cash/Vouchers",
+  "2" = "Redeemable Goods",
+  "3" = "Public Service Priority",
+  "4" = "Honorary Rewards",
+  "5" = "Social/Charity Rewards"
 )
 
-data %>% filter(!is.na(.data[[q14_reward]])) %>% count(Option = .data[[q14_reward]], name = "Count") %>%
-  mutate(Option_En = reward_map[Option], Proportion = sprintf("%.1f%%", Count / sum(Count) * 100)) %>%
+data %>% 
+  filter(!is.na(.data[[q14_reward]])) %>% 
+  count(Option = .data[[q14_reward]], name = "Count") %>% 
+  mutate(
+    Option_En = reward_map[Option], 
+    Proportion = sprintf("%.1f%%", Count / sum(Count) * 100)
+  ) %>% 
   arrange(desc(Count)) %>% select(Option_En, Count, Proportion) %>% kable(format = "simple") %>% print()
 
 q14_tests <- lapply(names(demo_groups_app), function(gvar) {
@@ -1122,24 +1127,43 @@ p_q14_sig <- q14_tests %>%
   pub_theme +
   theme(axis.text.x = element_blank(), panel.grid = element_blank())
 
-# Q14 分布热图（绿色）
-q14_freq <- data %>%
-  filter(!is.na(.data[[q14_reward]])) %>%
-  count(Reward = .data[[q14_reward]], name = "Count") %>%
-  mutate(Proportion = Count / sum(Count),
-         Reward_En = reward_map[Reward],
-         Reward_En = factor(Reward_En, levels = reward_map))
+# Q14 分布热图（按群体分组）
+q14_by_group <- lapply(names(demo_groups_app), function(gvar) {
+  data %>%
+    filter(!is.na(.data[[gvar]]) & !is.na(.data[[q14_reward]])) %>%
+    group_by(grp = .data[[gvar]]) %>%
+    count(Reward = .data[[q14_reward]], name = "Count", .drop = FALSE) %>%
+    mutate(n_grp = sum(Count), Proportion = Count / n_grp) %>%
+    ungroup() %>%
+    mutate(
+      Dimension = demo_groups_app[gvar],
+      Reward_En = reward_map[Reward],
+      grp = as.character(grp)
+    ) %>%
+    select(Dimension, grp, Reward_En, Proportion)
+}) %>% bind_rows()
 
-p_q14_dist <- q14_freq %>%
-  ggplot(aes(x = Reward_En, y = 1, fill = Proportion)) +
+# 准备绘图数据
+q14_prop_by_group <- q14_by_group %>%
+  mutate(
+    Dimension = factor(Dimension, levels = c("Gender", "Age", "Education", "Marital", "APP Usage")),
+    Reward_En = factor(Reward_En, levels = reward_map),
+    grp = factor(grp, levels = sort(unique(grp)))
+  )
+
+p_q14_dist <- q14_prop_by_group %>%
+  ggplot(aes(x = Reward_En, y = grp, fill = Proportion)) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 2.5, color = "white", fontface = "bold", family = "sans") +
+  facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
   scale_fill_gradient(low = "#A5D6A7", high = "#2E7D32", name = "Proportion") +
-  labs(title = "(m)", x = NULL, y = NULL) +
+  labs(title = "(m) Desired Rewards by Group", x = NULL, y = "Group") +
   pub_theme +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1),
-        axis.text.y = element_blank(), axis.ticks.y = element_blank(),
-        panel.grid = element_blank(), legend.key.height = unit(0.8, "cm"))
+  theme(
+    text = element_text(size = 80), 
+    panel.grid = element_blank(), 
+    axis.text.x = element_text(angle = 90)
+  )
 
 
 # 5.3 Q15 使用障碍
@@ -1200,6 +1224,14 @@ cat("✓ Exported: q13_attract_significance_data.csv\n")
 # 表2：比例数据（p_q13_prop对应的数据）
 write.csv(q13_prop_by_group, "data_proc/q13_attract_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
 cat("✓ Exported: q13_attract_proportion_by_group.csv\n")
+
+# 5.4b 单独导出Q14分布图
+ggsave("data_proc/q14_desired_reward_distribution.png", p_q14_dist, width = 22, height = 28, units = "cm", dpi = 300, bg = "white")
+cat("✓ Exported: q14_desired_reward_distribution.png\n")
+
+# 导出Q14数据表格
+write.csv(q14_prop_by_group, "data_proc/q14_reward_distribution_data.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q14_reward_distribution_data.csv\n")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
