@@ -2,8 +2,219 @@
 # 包含：桑基图、行为变化分析、三组对比、Q4/Q20感知分析、Q13/Q14/Q15多选题分析
 
 # 载入包。
-pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext, stringr)
+pacman::p_load(dplyr, tidyr, ggplot2, ggsankey, patchwork, knitr, showtext, stringr, readxl)
 showtext_auto()
+
+question_map <- c(
+  "id" = "序号",
+  "submit_time" = "提交答卷时间",
+  "time_spent" = "所用时间",
+  "source" = "来源",
+  "source_detail" = "来源详情",
+  "ip_address" = "来自IP",
+  "total_score" = "总分",
+  "gender" = "性别",
+  "age" = "年龄",
+  "education" = "教育",
+  "marital_status" = "婚姻状况",
+  "housing_sqm" = "住房面积（平方米）",
+  "monthly_income_personal" = "个人月收入（元）",
+  "monthly_income_family" = "家庭每月可支配收入（元）",
+  "family_other_pop" = "家庭同住其他人口数量",
+  "car_ownership" = "汽车拥有量",
+  "new_energy_car_num" = "(1)其中新能源汽车___辆",
+  "car_freq" = "汽车使用频率",
+  "residence_area" = "居住区域",
+  "residence_community" = "并且填写居住小区:",
+  "q1_used_app" = "1 您是否使用过低碳减排APP?",
+  "q2_how_know_app" = "2 您是如何了解到这个低碳减排APP的:",
+  "q3_why_start_app" = "3 您为何开始使用这个低碳减排APP:",
+  "q4_ui_simple" = "请选择最符合您想法或行为频率的选项。—1 我觉得低碳减排APP的界面应当简洁明了，方便浏览和操作。",
+  "q4_integrate_platform" = "2 如果低碳减排APP与我常用的平台（如支付宝或微信）打通，我会更愿意使用它。",
+  "q4_auto_record" = "3 如果APP能自动记录我的出行、用电等数据，我会觉得使用起来更方便。",
+  "q4_clear_guidance" = "4 如果APP能清晰地引导我如何参与低碳活动，并且提供具体建议，我会更愿意持续使用它。",
+  "q4_raise_awareness" = "5 我认为使用低碳减排APP能有效提高我的低碳行为意识。",
+  "q4_info_feedback_useful" = "6 该APP提供的信息和反馈对我来说是实用的。",
+  "q4_quicker_green_choice" = "7 使用该APP能让我更快地做出环保的生活选择。",
+  "q4_know_carbon_credit" = "8 我了解“碳普惠”机制。",
+  "q5_info_source_1" = "9 对于您来说，了解“碳普惠”或“低碳减排”方面信息的主要来源是？（提示：例如电视、报纸、网络、广告、政府文件、学校、社区管理员、志愿者、家人朋友等，也可以填写更具体的渠道）请填写最重要的1-3项，并且按照信息可靠程度进行排序。—1",
+  "q5_info_source_2" = "2",
+  "q5_info_source_3" = "3",
+  "q6_know_garbage_sort" = "—10 我了解生活垃圾分类，包括分类的必要性、现状、分类方法、垃圾去向。",
+  "q7_friend_recommend" = "11 我的朋友中有人已经使用或推荐过低碳减排APP。",
+  "q8_social_media_influence" = "12 社交平台上的环保内容（如视频、话题、朋友圈动态）让我更关注自己的碳行为。",
+  "q9_share_participate" = "13 如果我使用低碳减排APP，我希望朋友们知道我参与了这个计划（如转发、展示成绩）。",
+  "q10_app_freq" = "(1)14 您最近使用该APP的频率大约是每月___次。",
+  "q11_app_main_use" = "15 您主要使用该APP来做什么:",
+  "q12_incentive_points" = "16 在使用过程中，您觉得实际上哪些方面最能激励您持续参与?（最多选择3项）(积分兑奖)",
+  "q12_incentive_viz" = "16(图示减排成果（如碳足迹排名或减排量）)",
+  "q12_incentive_ui" = "16(简洁、易操作的界面)",
+  "q12_incentive_social" = "16(朋友参与和社交互动)",
+  "q12_incentive_game" = "16(有趣的任务和游戏)",
+  "q12_incentive_expert_advice" = "16(官方或专家推荐的减碳建议)",
+  "q12_incentive_data_life" = "16(与生活紧密结合的数据记录（如出行、用电）)",
+  "q12_incentive_other" = "16(其他（请注明:）)",
+  "q13_attract_points" = "17 以下功能中，哪些最能吸引您使用一个低碳减排APP?(碳积分兑换商品或代金券)",
+  "q13_attract_credit" = "17(提供绿色信用积分或政策优惠（如积分换公共服务）)",
+  "q13_attract_daily_task" = "17(每日打卡/完成任务以获得积分)",
+  "q13_attract_ranking" = "17(朋友排行榜、成就徽章展示)",
+  "q13_attract_game_fun" = "17(抽奖、幸运转盘等娱乐性玩法)",
+  "q13_attract_viz_carbon" = "17(可视化我的碳足迹与节能贡献)",
+  "q13_attract_other" = "17(其他（请注明:）)",
+  "q14_desired_reward" = "18 在以下APP提供的奖励中，我更希望获得:",
+  "q15_barrier_trouble" = "19 您认为目前阻碍人们使用低碳减排APP的主要原因是什么?(觉得低碳减排APP的使用操作可能比较麻烦)",
+  "q15_barrier_privacy" = "19(担心在使用低碳减排APP时个人信息不安全)",
+  "q15_barrier_low_reward" = "19(积分奖励太少，对我没有吸引力)",
+  "q15_barrier_unknown" = "19(很多人没有听说过这类APP)",
+  "q15_barrier_other" = "19(其他:)",
+  "q16_pre_public_trans" = "20 请您依据使用APP前的行为频率进行选择。—搭乘公共交通",
+  "q16_pre_bike_walk" = "骑行或步行出行...63",
+  "q16_pre_turn_off_power" = "关闭不用电器的电源...64",
+  "q16_pre_garbage_sort" = "垃圾分类与回收...65",
+  "q16_pre_reusable_bag" = "使用可重复使用的购物袋...66",
+  "q16_pre_choose_energy_eff" = "选择节能但是售价更贵的电器...67",
+  "q17_usual_public_trans" = "20 请您依据平时的行为频率进行选择。—搭乘公共交通",
+  "q17_usual_bike_walk" = "骑行或步行出行...69",
+  "q17_usual_turn_off_power" = "关闭不用电器的电源...70",
+  "q17_usual_garbage_sort" = "垃圾分类与回收...71",
+  "q17_usual_reusable_bag" = "使用可重复使用的购物袋...72",
+  "q17_usual_choose_energy_eff" = "选择节能但是售价更贵的电器...73",
+  "q18_change_public_trans" = "21 请问上述行为在使用该APP之后是否发生了改变?—搭乘公共交通",
+  "q18_change_bike_walk" = "骑行或步行出行...75",
+  "q18_change_turn_off_power" = "关闭不用电器的电源...76",
+  "q18_change_garbage_sort" = "垃圾分类与回收...77",
+  "q18_change_reusable_bag" = "使用可重复使用的购物袋...78",
+  "q18_change_choose_energy_eff" = "选择节能但是售价更贵的电器...79",
+  "q19_desired_feature" = "22 如果该APP可以添加一个功能或服务，您最希望是什么?",
+  "q20_celeb_endorsement" = "—23 如果APP有明星或公众人物代言，我会更关注这个APP。",
+  "q20_video_intro" = "24 如果APP有视频/短片介绍，我更愿意点击了解内容。",
+  "q20_focus_env_vs_self" = "25 当APP介绍的是“环保意义”而不是“个人利益”（如积分、优惠券）时，我反而不太有兴趣继续使用。",
+  "q20_ranking_motivation" = "26 如果APP提供“碳足迹排行”或“减排成就”，我会更有动力坚持使用该APP。",
+  "q20_image_inspire" = "27 我觉得相比文字，APP界面上的图像或动画更能激发我使用APP的兴趣。",
+  "q20_cumulative_inspire" = "28 当我看到累计的碳减排成效，我更愿意维持低碳行为。",
+  "q21_suggestion" = "29 感谢您对本次调查的支持，您可以在下方写下您对低碳减排APP或者碳普惠的想法或建议。"
+)
+
+# 定义需要生成饼图的变量名（与数据框中的列名对应）
+variables <- c(
+  "gender", "age", "education", "marital_status", "housing_sqm",
+  "monthly_income_personal", "monthly_income_family", "family_other_pop",
+  "car_ownership"
+)
+
+# 构建数据。
+combine_col_id <- 23
+data <- left_join(
+  # 个人属性等问题取文本。
+  read_excel(
+    "data_raw/320419112_按文本_2025年低碳减排问卷调查_1108_1067.xlsx", 
+    range = cell_cols(1:combine_col_id)
+  ) %>% 
+    rename(!!!head(question_map, combine_col_id)) %>% 
+    select(
+      -submit_time, -time_spent, -source, -source_detail, -ip_address, 
+      -total_score
+    ) %>% 
+    mutate(id = as.numeric(id)), 
+  # 调查主体问题取序号。
+  read_excel(
+    "data_raw/320419112_按序号_2025年低碳减排问卷调查_1108_1067.xlsx"
+  ) %>% 
+    rename(!!!question_map) %>% 
+    select(1, all_of(c(combine_col_id + 1):last_col())), 
+  by = "id"
+) %>% 
+  mutate(
+    age = case_when(
+      age %in% c("<18岁", "18–25岁", "26–30岁") ~ "<30", 
+      age %in% c("31–40岁", "41–50岁") ~ "31-50", 
+      age %in% c("≥51岁") ~ "≥51"
+    ), 
+    education = case_when(
+      education %in% c("初中及以下", "高中/技校") ~ "高中及以下", 
+      TRUE ~ education
+    ), 
+    marital_status = case_when(
+      marital_status %in% c("其他〖分居〗", "离婚", "未婚") ~ "独居", 
+      marital_status == "已婚" ~ "已婚"
+    ), 
+    monthly_income_personal = case_when(
+      monthly_income_personal %in% c("≤2000", "2000–4000", "4000–6000") ~ 
+        "<6000", 
+      monthly_income_personal %in% c("6000–8000", "8000–10000") ~ 
+        "6000-10000", 
+      monthly_income_personal %in% c("10000–20000") ~ 
+        "10000-20000", 
+      monthly_income_personal %in% c("20000–30000", "≥30000") ~ ">20000"
+    ), 
+    # 1. 确定除数（总人数 = 其他成员 + 受访者本人）
+    # 如果 other_pop 为 "≥5"，按 5 计算，总人数为 6
+    div_n = case_when(
+      family_other_pop == "≥5" ~ 6,
+      TRUE ~ as.numeric(as.character(family_other_pop)) + 1
+    ),
+    
+    # 2. 动态计算并生成字符串标签
+    mon_income_family_pc = case_when(
+      # 场景一：上限型 (≤4000)
+      monthly_income_family == "≤4000" ~ 
+        paste0("≤", round(4000 / div_n, 0)),
+      
+      # 场景二：区间型 (4000-6000)
+      monthly_income_family == "4000-6000" ~ 
+        paste0(round(4000 / div_n, 0), "-", round(6000 / div_n, 0)),
+      
+      monthly_income_family == "6000-8000" ~ 
+        paste0(round(6000 / div_n, 0), "-", round(8000 / div_n, 0)),
+      
+      monthly_income_family == "8000-10000" ~ 
+        paste0(round(8000 / div_n, 0), "-", round(10000 / div_n, 0)),
+      
+      monthly_income_family == "10000-20000" ~ 
+        paste0(round(10000 / div_n, 0), "-", round(20000 / div_n, 0)),
+      
+      monthly_income_family == "20000-30000" ~ 
+        paste0(round(20000 / div_n, 0), "-", round(30000 / div_n, 0)),
+      # 场景三：下限型 (≥30,000)
+      # 先去掉逗号再计算
+      monthly_income_family == "≥30,000" | monthly_income_family == "≥30000" ~ 
+        paste0("≥", round(30000 / div_n, 0))
+    ), 
+    # 为了分类，我们需要提取标签中的“上限”数值进行逻辑判断
+    upper_bound = case_when(
+      str_detect(mon_income_family_pc, "≤") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "\\d+")),
+      str_detect(mon_income_family_pc, "≥") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "\\d+")),
+      str_detect(mon_income_family_pc, "-") ~ 
+        as.numeric(str_extract(mon_income_family_pc, "(?<=-)\\d+")),
+      TRUE ~ NA_real_
+    ),
+    # 进一步整理为高中低收入
+    mon_income_family_pc_lvl = case_when(
+      # 1. 最高档：只要上限或下限超过 8000
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 9000) | 
+        upper_bound > 9000 ~ "≥9000",
+      # 2. 中高档：剩下的里面，上限超过 6000 的（即 6001-8000）
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 6000) | 
+        upper_bound > 6000 ~ "6000-9000",
+      # 3. 中等档：剩下的里面，上限超过 4000 的（即 4001-6000）
+      (str_detect(mon_income_family_pc, "≥") & upper_bound >= 3000) | 
+        upper_bound > 3000 ~ "3000-6000",
+      # 4. 低收入：剩下的所有情况（即上限 <= 4000 的所有人群）
+      TRUE ~ "≤3000"
+    ), 
+    mon_income_family_pc_lvl = factor(mon_income_family_pc_lvl, levels = c(
+      "≤3000", "3000-6000", "6000-9000", "≥9000"
+    )),
+    car_ownership = case_when(
+      car_ownership %in% c("2", "≥3") ~ "≥2", 
+      TRUE ~ car_ownership
+    ), 
+    q1_used_app = grepl("使用过", q1_used_app)
+  ) %>% 
+  # 移除中间变量。
+  select(-div_n, -upper_bound)
 
 # Bug: data来自report.r
 app_users <- data %>% 
@@ -86,7 +297,7 @@ q15_barrier <- c(
 )
 
 # 作图设置。
-pub_theme <- theme_bw(base_size = 18, base_family = "serif") +
+pub_theme <- theme_bw(base_size = 18, base_family = "sans") +
   theme(
     plot.title = element_text(size = rel(0.8)),
     axis.title = element_text(face = "bold", size = rel(0.9)),
@@ -823,7 +1034,8 @@ q13_by_group <- lapply(names(demo_groups_app), function(gvar) {
   calc_multi_by_group(data, q13_attract, gvar) %>%
     left_join(test_multi_by_group(data, q13_attract, gvar) %>% select(var, p.value, stat), by = "var") %>%
     mutate(Dimension = demo_groups_app[gvar])
-}) %>% bind_rows()
+}) %>% 
+  bind_rows()
 
 q13_tests <- q13_by_group %>% select(Dimension, Option, p.value, stat) %>% distinct() %>%
   mutate(Sig = case_when(is.na(p.value) ~ "NA", p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*", TRUE ~ "ns"),
