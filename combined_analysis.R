@@ -1089,11 +1089,12 @@ cat("\n--- 5.2 Q14 Desired Rewards ---\n")
 
 # 奖励类型英文映射
 reward_map <- c(
-  "1" = "Cash/Vouchers",
-  "2" = "Redeemable Goods",
-  "3" = "Public Service Priority",
-  "4" = "Honorary Rewards",
-  "5" = "Social/Charity Rewards"
+  "1" = "Transit discount",
+  "2" = "Eco product exchange",
+  "3" = "Shopping vouchers",
+  "4" = "Low-carbon badge",
+  "5" = "IP merchandise", 
+  "6" = "Other"
 )
 
 data %>% 
@@ -1105,27 +1106,67 @@ data %>%
   ) %>% 
   arrange(desc(Count)) %>% select(Option_En, Count, Proportion) %>% kable(format = "simple") %>% print()
 
+# Q14 显著性检验（按奖励类型逐项检测群体间的差异）
 q14_tests <- lapply(names(demo_groups_app), function(gvar) {
-  d <- data %>% filter(!is.na(.data[[gvar]]) & !is.na(.data[[q14_reward]]))
-  test <- tryCatch(chisq.test(table(d[[gvar]], d[[q14_reward]])),
-                   error = function(e) tryCatch(fisher.test(table(d[[gvar]], d[[q14_reward]]), simulate.p.value = TRUE), error = function(e2) NULL))
-  p <- if (!is.null(test)) test$p.value else NA
-  stat <- if (!is.null(test) && "statistic" %in% names(test)) test$statistic else NA
-  data.frame(Dimension = demo_groups_app[gvar], p.value = p, stat = stat)
+  # 获取该维度下的有效数据
+  d <- data %>%
+    filter(!is.na(.data[[gvar]]) & !is.na(.data[[q14_reward]]))
+
+  reward_list <- unique(d[[q14_reward]])
+
+  if (length(reward_list) < 1) {
+    return(data.frame(Dimension = character(), Reward = character(), p.value = numeric(), stat = numeric()))
+  }
+
+  # 对每个奖励项单独进行卡方检验
+  results <- lapply(reward_list, function(reward_val) {
+    # 创建 2×n 列联表：选择该奖励 vs 不选择该奖励，按群体分组
+    contingency_data <- d %>%
+      mutate(Selected = (.data[[q14_reward]] == reward_val)) %>%
+      group_by(grp = .data[[gvar]], Selected) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      pivot_wider(names_from = Selected, values_from = n, values_fill = 0) %>%
+      select(-grp)
+
+    # 如果列联表行数 < 2，跳过
+    if (nrow(contingency_data) < 2) {
+      return(data.frame(Reward = reward_val, p.value = NA, stat = NA))
+    }
+
+    # 对该奖励进行卡方检验
+    test <- tryCatch(
+      chisq.test(as.matrix(contingency_data)),
+      error = function(e) NULL
+    )
+
+    p <- if (!is.null(test)) test$p.value else NA
+    stat <- if (!is.null(test)) test$statistic else NA
+
+    data.frame(Reward = reward_val, p.value = p, stat = stat)
+  }) %>% bind_rows()
+
+  # 添加维度信息
+  results %>%
+    mutate(Dimension = demo_groups_app[gvar])
 }) %>% bind_rows() %>%
   mutate(Sig = case_when(is.na(p.value) ~ "NA", p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*", TRUE ~ "ns"),
-         Dimension = factor(Dimension, demo_groups_app),
+         Dimension = factor(Dimension, levels = c("Gender", "Age", "Education", "Marital", "APP Usage")),
+         Reward_En = reward_map[as.character(Reward)],
          label_text = ifelse(is.na(stat), Sig, paste0("X2=", round(stat, 1), "\n", Sig)))
-q14_tests %>% select(Dimension, p.value, Sig) %>% kable(digits = 4, format = "simple") %>% print()
 
 p_q14_sig <- q14_tests %>%
-  ggplot(aes(x = 1, y = Dimension, fill = (Sig != "ns" & Sig != "NA"))) +
+  ggplot(aes(x = Reward_En, y = Dimension, fill = (Sig != "ns" & Sig != "NA"))) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = label_text), size = 3.5, lineheight = 0.85) +
-  scale_fill_manual(values = c("TRUE" = "#4CAF50", "FALSE" = "#E0E0E0"), guide = "none") +
-  labs(title = "(l)", x = NULL, y = "Dimension") +
+  geom_text(aes(label = label_text), size = 15, lineheight = 0.85, family = "sans") +
+  scale_fill_manual(values = c("TRUE" = "#2196F3", "FALSE" = "#E0E0E0"), guide = "none") +
+  scale_y_discrete(limits = rev(levels(q14_tests$Dimension))) +
+  labs(title = "(l) Desired Rewards - Significance by Group", x = NULL, y = "Dimension") +
   pub_theme +
-  theme(axis.text.x = element_blank(), panel.grid = element_blank())
+  theme(
+    text = element_text(size = 80), 
+    panel.grid = element_blank(), 
+    axis.text.x = element_text(angle = 90)
+  )
 
 # Q14 分布热图（按群体分组）
 q14_by_group <- lapply(names(demo_groups_app), function(gvar) {
@@ -1154,7 +1195,7 @@ q14_prop_by_group <- q14_by_group %>%
 p_q14_dist <- q14_prop_by_group %>%
   ggplot(aes(x = Reward_En, y = grp, fill = Proportion)) +
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 2.5, color = "white", fontface = "bold", family = "sans") +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 15, color = "white", fontface = "bold", family = "sans") +
   facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
   scale_fill_gradient(low = "#A5D6A7", high = "#2E7D32", name = "Proportion") +
   labs(title = "(m) Desired Rewards by Group", x = NULL, y = "Group") +
@@ -1225,13 +1266,24 @@ cat("✓ Exported: q13_attract_significance_data.csv\n")
 write.csv(q13_prop_by_group, "data_proc/q13_attract_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
 cat("✓ Exported: q13_attract_proportion_by_group.csv\n")
 
-# 5.4b 单独导出Q14分布图
-ggsave("data_proc/q14_desired_reward_distribution.png", p_q14_dist, width = 22, height = 28, units = "cm", dpi = 300, bg = "white")
-cat("✓ Exported: q14_desired_reward_distribution.png\n")
+# 5.4b 单独导出Q14图（Significance + Distribution）
+p_q14_combined <- (p_q14_sig / p_q14_dist) +
+  plot_layout(heights = c(1, 2.5)) +
+  plot_annotation(
+    title = "Q14: Desired Rewards - Significance Test and Proportion by Group",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 18))
+  )
+
+ggsave("data_proc/q14_desired_reward_significance_distribution.png", p_q14_combined, width = 30, height = 40, units = "cm", dpi = 300, bg = "white")
 
 # 导出Q14数据表格
-write.csv(q14_prop_by_group, "data_proc/q14_reward_distribution_data.csv", row.names = FALSE, fileEncoding = "UTF-8")
-cat("✓ Exported: q14_reward_distribution_data.csv\n")
+# 表1：显著性检验数据
+write.csv(q14_tests, "data_proc/q14_reward_significance_data.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q14_reward_significance_data.csv\n")
+
+# 表2：比例数据
+write.csv(q14_prop_by_group, "data_proc/q14_reward_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q14_reward_proportion_by_group.csv\n")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
