@@ -1078,8 +1078,8 @@ p_q13_prop <- q13_prop_by_group %>%
   labs(title = "(b)", x = NULL, y = "Group") +
   pub_theme +
   theme(
-    text = element_text(size = 80), 
-    panel.grid = element_blank(), 
+    text = element_text(size = 80),
+    panel.grid = element_blank(),
     axis.text.x = element_text(angle = 90)
   )
 
@@ -1234,20 +1234,41 @@ p_q15_sig <- q15_tests %>%
   pub_theme +
   theme(axis.text.x = element_text(angle = 30, hjust = 1), panel.grid = element_blank())
 
-# Q15 比例热图
-q15_freq <- calc_multi_freq(data, q15_barrier) %>%
-  mutate(Option = factor(Option, q15_barrier))
+# Q15 比例热图 - 按群体分组（含显著性标记）
+# 先创建显著性标记表
+q15_sig_map <- q15_by_group %>%
+  select(Dimension, Option, p.value) %>%
+  distinct() %>%
+  mutate(is_significant = !is.na(p.value) & p.value < 0.05)
 
-p_q15_prop <- q15_freq %>%
-  ggplot(aes(x = Option, y = 1, fill = Proportion)) +
+# 再创建比例数据框并添加显著性标记
+q15_prop_by_group <- q15_by_group %>%
+  select(Option, Dimension, grp, Proportion) %>%
+  distinct() %>%
+  left_join(q15_sig_map %>% select(Dimension, Option, is_significant), by = c("Dimension", "Option")) %>%
+  mutate(
+    Option = factor(Option, q15_barrier),
+    Dimension = factor(Dimension, levels = c("Gender", "Age", "Education", "Marital", "APP Usage")),
+    grp = factor(grp, levels = sort(unique(grp))),  # 按字母顺序排列群体
+    is_significant = replace_na(is_significant, FALSE)  # 缺失值默认为FALSE
+  )
+
+p_q15_prop <- q15_prop_by_group %>%
+  ggplot(aes(x = Option, y = grp, fill = Proportion)) +
+  # 第一层：普通边框（白色）
   geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 4.5, color = "white", fontface = "bold") +
+  # 第二层：显著部分用红色边框覆盖
+  geom_tile(data = . %>% filter(is_significant == TRUE), color = "red", linewidth = 2.5, fill = NA) +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)), size = 15, color = "white", fontface = "bold") +
+  facet_wrap(~ Dimension, scales = "free_y", ncol = 1) +
   scale_fill_gradient(low = "#FFCCBC", high = "#D84315", name = "Proportion") +
-  labs(title = "(o)", x = NULL, y = NULL) +
+  labs(title = "(o)", x = NULL, y = "Group") +
   pub_theme +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1),
-        axis.text.y = element_blank(), axis.ticks.y = element_blank(),
-        panel.grid = element_blank(), legend.key.height = unit(0.8, "cm"))
+  theme(
+    text = element_text(size = 80),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 90)
+  )
 
 
 # 5.4 单独导出Q13图（Significance + Heatmap）
@@ -1284,6 +1305,22 @@ cat("✓ Exported: q14_reward_significance_data.csv\n")
 # 表2：比例数据
 write.csv(q14_prop_by_group, "data_proc/q14_reward_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
 cat("✓ Exported: q14_reward_proportion_by_group.csv\n")
+
+# 5.4c 单独导出Q15图（Significance + Heatmap）
+p_q15_combined <- (p_q15_sig / p_q15_prop) +
+  plot_layout(heights = c(1, 2.5)) +
+  plot_annotation(title = "Q15: Usage Barriers")
+
+ggsave("data_proc/q15_barrier_significance_heatmap.png", p_q15_combined, width = 30, height = 40, units = "cm", dpi = 300, bg = "white")
+
+# 导出Q15数据表格
+# 表1：显著性检验数据
+write.csv(q15_tests, "data_proc/q15_barrier_significance_data.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q15_barrier_significance_data.csv\n")
+
+# 表2：比例数据
+write.csv(q15_prop_by_group, "data_proc/q15_barrier_proportion_by_group.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("✓ Exported: q15_barrier_proportion_by_group.csv\n")
 
 # 5.5 Q13/Q14/Q15 组合图 (3x2)
 p_combined_q13q14q15 <- (p_q13_sig + p_q13_prop) / (p_q14_sig + p_q14_dist) / (p_q15_sig + p_q15_prop) +
