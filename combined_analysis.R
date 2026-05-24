@@ -1424,13 +1424,294 @@ export_sankey_to_excel <- function(sankey_list, filename = "data_proc/sankey_det
 export_sankey_to_excel(sankey_detailed_list)
 
 # ==============================================================================
+# PART 7: 整体摘要可视化 (Overall Summary Plots)
+# 包含：Q13条形图、Q15条形图、Q14饼图
+# ==============================================================================
+
+cat("\n\n", strrep("#", 80), "\n")
+cat("PART 7: Generating Overall Summary Visualizations\n")
+cat(strrep("#", 80), "\n")
+
+# ============================================================================
+# 7.1 Q13 和 Q15 条形图
+# ============================================================================
+
+# Q13 吸引因素整体选择比例
+q13_attract <- c(
+  "q13_attract_points" = "Points Exchange",
+  "q13_attract_credit" = "Green Credit",
+  "q13_attract_daily_task" = "Daily Tasks",
+  "q13_attract_ranking" = "Rankings/Badges",
+  "q13_attract_game_fun" = "Entertainment",
+  "q13_attract_viz_carbon" = "Carbon Visualization"
+)
+
+q13_overall <- data %>%
+  summarise(across(all_of(names(q13_attract)), ~sum(., na.rm = TRUE) / n())) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Proportion") %>%
+  mutate(
+    Factor = q13_attract[Variable],
+    Factor = factor(Factor, levels = q13_attract)
+  ) %>%
+  select(Factor, Proportion)
+
+# Q15 阻碍因素整体选择比例
+q15_barrier <- c(
+  "q15_barrier_trouble" = "Complex Operation",
+  "q15_barrier_privacy" = "Privacy Concerns",
+  "q15_barrier_low_reward" = "Low Rewards",
+  "q15_barrier_unknown" = "Unaware of APP"
+)
+
+q15_overall <- data %>%
+  summarise(across(all_of(names(q15_barrier)), ~sum(., na.rm = TRUE) / n())) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Proportion") %>%
+  mutate(
+    Factor = q15_barrier[Variable],
+    Factor = factor(Factor, levels = q15_barrier)
+  ) %>%
+  select(Factor, Proportion)
+
+# 绘制 Q13 条形图
+p_q13_bar <- q13_overall %>%
+  ggplot(aes(x = Factor, y = Proportion, fill = Proportion)) +
+  geom_col(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)),
+            vjust = -0.5, size = 4.5, fontface = "bold") +
+  scale_fill_gradient(low = "#C8E6C9", high = "#2E7D32", guide = "none") +
+  scale_y_continuous(limits = c(0, max(q13_overall$Proportion) * 1.1),
+                     labels = scales::percent_format()) +
+  labs(title = "(a) Q13: App Attraction Factors", x = NULL, y = "Selection Rate") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_text(size = 11),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# 绘制 Q15 条形图
+p_q15_bar <- q15_overall %>%
+  ggplot(aes(x = Factor, y = Proportion, fill = Proportion)) +
+  geom_col(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = sprintf("%.1f%%", Proportion * 100)),
+            vjust = -0.5, size = 4.5, fontface = "bold") +
+  scale_fill_gradient(low = "#FFCCBC", high = "#D84315", guide = "none") +
+  scale_y_continuous(limits = c(0, max(q15_overall$Proportion) * 1.1),
+                     labels = scales::percent_format()) +
+  labs(title = "(b) Q15: App Usage Barriers", x = NULL, y = "Selection Rate") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_text(size = 11),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# 组合两个条形图
+p_bars_combined <- p_q13_bar / p_q15_bar +
+  plot_layout(heights = c(1, 1))
+
+# ============================================================================
+# 7.2 Q14 奖励类型饼图
+# ============================================================================
+
+reward_map <- c(
+  "1" = "Transit Discount",
+  "2" = "Eco-product",
+  "3" = "Shopping Vouchers",
+  "4" = "Low-carbon Badge",
+  "5" = "IP Merchandise"
+)
+
+q14_overall <- data %>%
+  filter(!is.na(q14_desired_reward)) %>%
+  count(Reward = q14_desired_reward, name = "Count") %>%
+  mutate(
+    Reward_Label = reward_map[Reward],
+    Proportion = Count / sum(Count),
+    Percentage = sprintf("%.1f%%", Proportion * 100),
+    Label = paste0(Reward_Label, "\n", Percentage)
+  ) %>%
+  arrange(desc(Count))
+
+# 定义颜色
+colors <- c("#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8")
+
+p_q14_pie <- q14_overall %>%
+  ggplot(aes(x = "", y = Proportion, fill = Reward_Label)) +
+  geom_col(color = "white", linewidth = 1.2) +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = Label),
+            position = position_stack(vjust = 0.5),
+            size = 3.8, fontface = "bold", color = "white") +
+  scale_fill_manual(values = colors, name = "Reward Type") +
+  labs(title = "(c) Q14: Preferred Rewards Distribution") +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5, margin = margin(b = 10)),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# ============================================================================
+# 7.3 保存图表
+# ============================================================================
+
+# 保存条形图
+ggsave("data_proc/q13_q15_overall_comparison.png",
+       p_bars_combined,
+       width = 28, height = 20, units = "cm", dpi = 300, bg = "white")
+cat("✓ Saved: q13_q15_overall_comparison.png\n")
+
+# 保存饼图
+ggsave("data_proc/q14_rewards_distribution_pie.png",
+       p_q14_pie,
+       width = 20, height = 16, units = "cm", dpi = 300, bg = "white")
+cat("✓ Saved: q14_rewards_distribution_pie.png\n")
+
+# 可选：保存组合图（所有三个）
+p_all_combined <- (p_q13_bar / p_q15_bar) | p_q14_pie +
+  plot_layout(widths = c(2, 1))
+
+ggsave("data_proc/q13_q14_q15_overall_summary.png",
+       p_all_combined,
+       width = 36, height = 20, units = "cm", dpi = 300, bg = "white")
+cat("✓ Saved: q13_q14_q15_overall_summary.png\n")
+
+cat("\n=== Q13/Q14/Q15 Overall Summary Statistics ===\n")
+cat("\nQ13 Attraction Factors:\n")
+print(q13_overall %>% mutate(Proportion = sprintf("%.1f%%", Proportion * 100)))
+
+cat("\nQ15 Usage Barriers:\n")
+print(q15_overall %>% mutate(Proportion = sprintf("%.1f%%", Proportion * 100)))
+
+cat("\nQ14 Reward Preferences:\n")
+print(q14_overall %>% select(Reward_Label, Count, Percentage))
+
+# ==============================================================================
 cat("\n\n", strrep("=", 80), "\n")
 cat("Analysis complete. Output files saved to data_proc/ directory:\n")
 cat("  - sankey_behavior_change.png\n")
-cat("  - sankey_detailed_analysis.xlsx (NEW!)\n")
+cat("  - sankey_detailed_analysis.xlsx\n")
 cat("  - behavior_change_within_group.png\n")
 cat("  - three_group_comparison_table.csv\n")
 cat("  - three_group_significance.png\n")
 cat("  - q4_q20_group_diff_heatmap.png\n")
 cat("  - q13_q14_q15_combined.png\n")
+cat("  - q13_q15_overall_comparison.png (NEW!)\n")
+cat("  - q14_rewards_distribution_pie.png (NEW!)\n")
+cat("  - q13_q14_q15_overall_summary.png (NEW!)\n")
+
+# ==============================================================================
+# PART 8: 人口统计信息表格
+# ==============================================================================
+
+cat("\n\n", strrep("=", 80), "\n")
+cat("PART 8: Demographic Statistics Tables\n")
+cat(strrep("=", 80), "\n\n")
+
+# 定义人口统计变量
+demo_vars <- c("gender", "age", "marital_status", "education")
+
+# ============================================================================
+# 8.1 表格1：所有用户的人口统计信息及App使用情况
+# ============================================================================
+
+table1_list <- list()
+
+for (var in demo_vars) {
+  temp <- data %>%
+    filter(!is.na(!!sym(var))) %>%
+    group_by(Category = !!sym(var)) %>%
+    summarise(
+      Count = n(),
+      Percentage = sprintf("%.1f%%", (n() / nrow(data %>% filter(!is.na(!!sym(var))))) * 100),
+      .groups = "drop"
+    ) %>%
+    mutate(Variable = var) %>%
+    select(Variable, Category, Count, Percentage)
+
+  table1_list[[var]] <- temp
+}
+
+# 合并所有变量
+table1_all_users <- bind_rows(table1_list) %>%
+  rename(
+    "Variable" = "Variable",
+    "Category" = "Category",
+    "Count" = "Count",
+    "Percentage" = "Percentage"
+  )
+
+# 为了更清晰，可以添加变量标签
+var_labels <- c(
+  "gender" = "Gender",
+  "age" = "Age",
+  "marital_status" = "Marital Status",
+  "education" = "Education"
+)
+
+table1_all_users <- table1_all_users %>%
+  mutate(Variable = var_labels[Variable]) %>%
+  select("Variable", "Category", "Count", "Percentage")
+
+cat("\n=== Table 1: All Users' Demographic Information ===\n")
+print(table1_all_users)
+
+# 保存为CSV
+write.csv(table1_all_users, "data_proc/table1_all_users_demographics.csv", row.names = FALSE)
+cat("✓ Saved: table1_all_users_demographics.csv\n")
+
+# ============================================================================
+# 8.2 表格2：App用户的人口统计信息
+# ============================================================================
+
+table2_list <- list()
+
+for (var in demo_vars) {
+  temp <- app_users %>%
+    filter(!is.na(!!sym(var))) %>%
+    group_by(Category = !!sym(var)) %>%
+    summarise(
+      Count = n(),
+      Percentage = sprintf("%.1f%%", (n() / nrow(app_users %>% filter(!is.na(!!sym(var))))) * 100),
+      .groups = "drop"
+    ) %>%
+    mutate(Variable = var) %>%
+    select(Variable, Category, Count, Percentage)
+
+  table2_list[[var]] <- temp
+}
+
+# 合并所有变量
+table2_app_users <- bind_rows(table2_list) %>%
+  rename(
+    "Variable" = "Variable",
+    "Category" = "Category",
+    "Count" = "Count",
+    "Percentage" = "Percentage"
+  )
+
+table2_app_users <- table2_app_users %>%
+  mutate(Variable = var_labels[Variable]) %>%
+  select("Variable", "Category", "Count", "Percentage")
+
+cat("\n=== Table 2: App Users' Demographic Information ===\n")
+print(table2_app_users)
+
+# 保存为CSV
+write.csv(table2_app_users, "data_proc/table2_app_users_demographics.csv", row.names = FALSE)
+cat("✓ Saved: table2_app_users_demographics.csv\n")
+
+# ==============================================================================
+cat("\n", strrep("=", 80), "\n")
+cat("All tables have been generated and saved to data_proc/ directory:\n")
+cat("  - table1_all_users_demographics.csv\n")
+cat("  - table2_app_users_demographics.csv\n")
 cat(strrep("=", 80), "\n")
